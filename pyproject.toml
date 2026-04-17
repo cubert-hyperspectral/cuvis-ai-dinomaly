@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cuvis-ai-dinomaly"
+version = "0.1.0"
+description = "Dinomaly (Anomalib) as a cuvis.ai plugin node."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "Cubert GmbH, Ulm, Germany", email = "cuvis.ai@cubert-gmbh.com" },
+]
+dependencies = [
+    "cuvis-ai>=0.1.0",
+    "cuvis-ai-core>=0.1.0",
+    "anomalib>=2.1.0,<3",
+    "numpy>=1.20.0",
+    "opencv-python>=4.8.0",
+    "tqdm>=4.66.0",
+    "defusedxml>=0.7.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://www.cubert-hyperspectral.com/"
+Repository = "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly"
+
+[tool.setuptools.packages.find]
+include = ["cuvis_ai_dinomaly*"]
+
+[tool.uv.sources]
+# Local editable overrides for internal development only.
+# Release installs from Git tags / manifests resolve dependencies from normal indexes.
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+cuvis-ai = { path = "../cuvis-ai", editable = true }
+cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core-sam3", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4"]
+extend-select = ["ANN201", "ANN202", "ANN204"]
+ignore = ["ANN401", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN201", "ANN202", "ANN204"]
+# Hydra entrypoints prepend examples/ to sys.path before importing the shared module.
+"examples/train_dinomaly_*_multifile.py" = ["E402"]
+"examples/train_dinomaly_cir_multifile_last_eval.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "slow: downloads weights or heavy GPU",
+    "integration: full stack",
+]
+
+[tool.coverage.run]
+source = ["cuvis_ai_dinomaly"]
+branch = true
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

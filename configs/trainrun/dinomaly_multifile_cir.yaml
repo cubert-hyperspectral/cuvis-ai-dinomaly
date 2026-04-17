@@ -1,0 +1,77 @@
+# @package _global_
+#
+# Same as dinomaly_multifile_rgb.yaml but intended for CIRSelector (NIR/R/G false-color).
+#   uv run python examples/train_dinomaly_cir_multifile.py
+#
+defaults:
+  - /training@training: default
+  - _self_
+
+name: dinomaly_multifile_cir
+
+output_dir: ./outputs/${name}
+
+minmax_init_frames: 20
+
+data:
+  splits_csv: /home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_full.csv
+  batch_size: 1
+  processing_mode: Reflectance
+  num_workers: 6
+  pin_memory: true
+  persistent_workers: true
+  worker_multiprocessing_context: spawn
+
+dinomaly:
+  use_center_crop: false
+  encoder_name: dinov2reg_vit_base_14
+  bottleneck_dropout: 0.2
+  decoder_depth: 8
+  image_size: 448
+  crop_size: 448
+
+training:
+  seed: 42
+  trainer:
+    max_epochs: 50
+    accelerator: auto
+    devices: 1
+    default_root_dir: ${output_dir}
+    precision: 32-true
+    accumulate_grad_batches: 1
+    enable_progress_bar: true
+    enable_checkpointing: true
+    log_every_n_steps: 10
+    val_check_interval: 1.0
+    check_val_every_n_epoch: 1
+    gradient_clip_val: 0.1
+    deterministic: false
+    benchmark: false
+  optimizer:
+    name: adamw
+    lr: 0.002
+    weight_decay: 0.0001
+    betas: [0.9, 0.999]
+  scheduler:
+    name: reduce_on_plateau
+    monitor: metrics_anomaly/iou
+    mode: max
+    factor: 0.5
+    patience: 2
+    threshold: 0.0001
+    threshold_mode: rel
+    cooldown: 0
+    min_lr: 1.0e-06
+    eps: 1.0e-08
+    verbose: false
+
+unfreeze_nodes:
+  - dinomaly_detector
+
+metric_nodes:
+  - metrics_anomaly
+
+loss_nodes:
+  - dinomaly_train_loss
+
+freeze_nodes: []
