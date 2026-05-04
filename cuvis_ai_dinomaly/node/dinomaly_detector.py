@@ -152,7 +152,14 @@ class DinomalyDetector(Node):
         x = rgb_image
         if x.dtype != torch.float32:
             x = x.float()
-        if x.max() > 1.0:
+        max_val = float(x.max())
+        # Backward-compatible behavior:
+        # - [0,1] input: unchanged
+        # - [0,255]-like input: divide by 255 (legacy path)
+        # - values above 255: robustly scale by observed max
+        if max_val > 255.0:
+            x = x / max_val
+        elif max_val > 1.0:
             x = x / 255.0
         x = x.clamp(0.0, 1.0)
         x = x.permute(0, 3, 1, 2)
