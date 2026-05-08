@@ -37,6 +37,35 @@ If `from cv2 import imread` fails, reinstall `opencv-python` (a broken `cv2` nam
 
 Encoder weights are frozen; only **bottleneck + decoder** train (same as Anomalib’s Lightning module).
 
+## Plugin manifest
+
+Drop one of these into your `plugins.yaml` and load with `NodeRegistry.load_plugins(...)`.
+
+**Local path** (development; iterate alongside the consumer pipeline):
+
+```yaml
+plugins:
+  dinomaly:
+    path: "../cuvis-ai-dinomaly"
+    provides:
+      - cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
+      - cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+```
+
+**Git tag** (reproducible install from a tagged release):
+
+```yaml
+plugins:
+  dinomaly:
+    repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly.git"
+    tag: "v0.1.3"
+    provides:
+      - cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
+      - cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+```
+
+A ready-to-use local-path manifest is committed at [`examples/plugins.yaml`](examples/plugins.yaml).
+
 ## cuvis-ai configs
 
 In the main **cuvis-ai** repo, manifests assume **`cuvis-ai-dinomaly` is a sibling folder** of `cuvis-ai` (e.g. `anish/cuvis-ai` and `anish/cuvis-ai-dinomaly`). If your layout differs, edit `path:` in `configs/plugins/dinomaly.yaml` and `configs/plugins/registry.yaml`.

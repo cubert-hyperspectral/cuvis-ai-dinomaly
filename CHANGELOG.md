@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Added `LICENSE` file (Apache-2.0 standard text + Cubert GmbH copyright) at repo root. `pyproject.toml` already declared `license = "Apache-2.0"` but the license text was not previously distributed.
+- Added a **Plugin manifest** section to `README.md` documenting both local-path and git-tag manifest forms (skill §9 / "When to stop" requirement).
+- Recorded compatibility audit against `cuvis-ai-core` 0.1.0 and 0.5.2 in [`docs/compatibility_audit.md`](docs/compatibility_audit.md). Result: PASS — every shared dep (`numpy`, `tqdm`, `defusedxml`, `requests`) satisfies the plugin's specifier; `anomalib`, `kornia`, `opencv-python`, `open-clip-torch` are not in either core lock so no conflict risk.
 - Added CI (`ci.yml`) workflow with `test`, `lint`, and `build` jobs (Ubuntu / Python 3.11 / `uv` with `--no-sources`). Test job runs `pytest tests/ -m "not slow"` so the `integration`-marked manifest-loading smoke test executes per the cuvis-ai plugin skill verification step.
 - Dropped runtime dependency on the high-level `cuvis-ai` package and added `cuvis-ai-schemas>=0.4.0`. The plugin now depends only on `cuvis-ai-core` + `cuvis-ai-schemas`, matching `cuvis-ai-deepeiou` / `cuvis-ai-sam3`. Avoids transitively importing the proprietary Cuvis SDK (`cuvis_il`) at module load.
 - Inlined a minimal `_LossNode` in `dinomaly_train_loss_bridge.py` mirroring `cuvis_ai.node.losses.LossNode` (marker subclass that defaults `execution_stages = {TRAIN, VAL, TEST}` on `Node.__init__`). No behavior change for consumers.
