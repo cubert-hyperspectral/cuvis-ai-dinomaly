@@ -38,6 +38,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "pip-audit>=2.7.0",
+    "detect-secrets>=1.4.0",
+    "bandit[toml]>=1.7.5",
 ]
 
 [project.urls]
@@ -91,3 +95,7 @@ omit = ["*/tests/*"]
 [tool.coverage.report]
 fail_under = 90
 show_missing = true
+
+[tool.bandit]
+exclude_dirs = ["tests", "examples", ".venv"]
+skips = ["B101"]
