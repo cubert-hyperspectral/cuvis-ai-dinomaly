@@ -35,7 +35,11 @@ jobs:
         # is the verification step required by the cuvis-ai-plugin skill.
         # `--no-sources` ignores the local-path overrides under
         # [tool.uv.sources] in pyproject.toml so PyPI/Git indexes are used.
-        run: uv run --no-sources --locked --extra dev pytest tests/ -m "not slow" -v
+        # `--locked` is intentionally omitted: the committed uv.lock was
+        # generated with local [tool.uv.sources] paths active, which conflicts
+        # with --no-sources. Re-add --locked once the lock is regenerated
+        # against the public indexes.
+        run: uv run --no-sources --extra dev pytest tests/ -m "not slow" -v
 
   lint:
     name: Focused Ruff Checks
@@ -54,10 +58,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Check formatting
-        run: uv run --no-sources --locked --extra dev ruff format --check cuvis_ai_dinomaly tests examples
+        run: uv run --no-sources --extra dev ruff format --check cuvis_ai_dinomaly tests examples
 
       - name: Run ruff
-        run: uv run --no-sources --locked --extra dev ruff check cuvis_ai_dinomaly tests examples
+        run: uv run --no-sources --extra dev ruff check cuvis_ai_dinomaly tests examples
 
   build:
     name: Build And Validate
@@ -82,4 +86,4 @@ jobs:
         run: uv build --no-sources
 
       - name: Validate distributions
-        run: uv run --no-sources --locked --with twine twine check dist/*
+        run: uv run --no-sources --with twine twine check dist/*
