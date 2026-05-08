@@ -29,6 +29,24 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Diagnostic — versions and import chain
+        # Surfaces the actual failing import (if any) before pytest runs,
+        # so the cause is visible in the public step output without log auth.
+        run: |
+          uv run --no-sources --extra dev python -c "
+          import sys, platform
+          print('python', sys.version)
+          print('platform', platform.platform())
+          import torch; print('torch', torch.__version__)
+          import anomalib; print('anomalib', anomalib.__version__)
+          import requests; print('requests', requests.__version__)
+          from anomalib.models.image.dinomaly.torch_model import DinomalyModel
+          print('DinomalyModel import: ok')
+          import cuvis_ai_core; print('cuvis_ai_core ok')
+          from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector
+          print('DinomalyDetector import: ok')
+          "
+
       - name: Run focused tests
         # `-m "not slow"` keeps `integration` enabled so the manifest-loading
         # smoke test (tests/test_plugin_manifest_loading.py) runs in CI, which
@@ -39,7 +57,7 @@ jobs:
         # generated with local [tool.uv.sources] paths active, which conflicts
         # with --no-sources. Re-add --locked once the lock is regenerated
         # against the public indexes.
-        run: uv run --no-sources --extra dev pytest tests/ -m "not slow" -v
+        run: uv run --no-sources --extra dev pytest tests/ -m "not slow" -v --tb=long -ra
 
   lint:
     name: Focused Ruff Checks
