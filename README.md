@@ -1,32 +1,33 @@
 # cuvis-ai-dinomaly
 
+![CI](https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly/actions/workflows/ci.yml/badge.svg)
+
 [Dinomaly](https://github.com/guojiajeremy/Dinomaly) anomaly detection as a **cuvis.ai plugin**, implemented with Intel **[Anomalib](https://github.com/open-edge-platform/anomalib)** `DinomalyModel`.
 
 ## Requirements
 
 - Python 3.11
-- `cuvis-ai` / `cuvis-ai-core` (see `pyproject.toml` `[tool.uv.sources]` for local vs Git)
-- GPU recommended (DINOv2 backbone download on first run)
+- `cuvis-ai-core>=0.1.0` and `cuvis-ai-schemas>=0.4.0` — the plugin does **not** depend on the high-level `cuvis-ai` package (avoids transitively importing the proprietary Cuvis SDK at module load)
+- GPU recommended (DINOv2 backbone is downloaded on first run)
 
 ## Install
+
+For development from a local checkout:
 
 ```bash
 cd cuvis-ai-dinomaly
 uv sync --extra dev
 ```
 
-Adjust `pyproject.toml` paths for `cuvis-ai` and `cuvis-ai-core` on your machine.
+For a clean install that resolves everything from public indexes (ignores the editable `[tool.uv.sources]` overrides):
+
+```bash
+uv sync --no-sources --extra dev
+```
 
 ### Using the plugin from the main `cuvis-ai` repo
 
-Install the same runtime deps into the **cuvis-ai** virtualenv (plugin code is loaded by path):
-
-```bash
-cd /path/to/cuvis-ai
-uv pip install "anomalib>=2.1,<3" "opencv-python>=4.8"
-```
-
-If `from cv2 import imread` fails, reinstall `opencv-python` (a broken `cv2` namespace package will prevent Anomalib from importing).
+When the plugin is loaded by path from a sibling `cuvis-ai` checkout, all runtime deps (`anomalib`, `kornia`, `opencv-python`, `open-clip-torch`, `requests`, …) come along automatically via the manifest install — no manual `uv pip install` step needed.
 
 ## Nodes
 
@@ -94,12 +95,16 @@ Anomalib’s `Dinomaly` Lightning module uses **StableAdamW** and a custom **war
 ## Tests
 
 ```bash
-uv run pytest tests/ -m "not slow"   # preprocessing + loss bridge
-uv run pytest tests/test_parity.py -m slow   # parity vs raw DinomalyModel (downloads weights)
+uv run pytest tests/ -m "not slow"          # fast suite (matches CI)
+uv run pytest tests/test_parity.py -m slow  # parity vs raw DinomalyModel (downloads weights)
 ```
 
-Set `CUVIS_DINOMALY_SKIP_SLOW=1` to skip slow tests in CI.
+Set `CUVIS_DINOMALY_SKIP_SLOW=1` to skip slow tests when running locally. CI runs only the fast suite (`-m "not slow"`); the `integration`-marked manifest-loading smoke test is included.
+
+## Compatibility
+
+Audited per the cuvis-ai plugin skill §8 against `cuvis-ai-core` `v0.1.0` (declared floor) and `v0.5.2` (latest released): every shared dep satisfies the plugin's specifier. See [`docs/compatibility_audit.md`](docs/compatibility_audit.md) for the per-dep verdict.
 
 ## License
 
-Apache-2.0 (aligns with Anomalib / typical Dinomaly redistribution). Attribute the original paper and repos in derivative work.
+Apache-2.0 — full text in [`LICENSE`](LICENSE). Aligns with Anomalib / typical Dinomaly redistribution. Attribute the original paper and repos in derivative work.
