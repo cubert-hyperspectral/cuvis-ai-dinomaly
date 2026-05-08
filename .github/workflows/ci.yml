@@ -61,8 +61,25 @@ jobs:
         run: uv run --no-sources --extra dev python -c "from loguru import logger"
       - name: Diagnostic — import torchvision.transforms.v2
         run: uv run --no-sources --extra dev python -c "from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize"
-      - name: Diagnostic — import DinomalyDetector
-        run: uv run --no-sources --extra dev python -c "from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector"
+      - name: Diagnostic — import DinomalyDetector (with traceback to summary)
+        run: |
+          set +e
+          uv run --no-sources --extra dev python -c "
+          import traceback, sys
+          try:
+              from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector
+              print('OK')
+          except BaseException:
+              traceback.print_exc()
+              sys.exit(1)
+          " > out.txt 2>&1
+          rc=$?
+          echo '## DinomalyDetector import diagnostic' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat out.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat out.txt
+          exit $rc
 
       - name: Run focused tests
         # `-m "not slow"` keeps `integration` enabled so the manifest-loading
