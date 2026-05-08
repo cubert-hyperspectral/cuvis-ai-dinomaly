@@ -23,10 +23,14 @@ class _FakeDinomalyModel(nn.Module):
         self.bottleneck = nn.Linear(1, 1, bias=False)
         self.decoder = nn.Linear(1, 1, bias=False)
 
-    def forward(self, x: torch.Tensor, global_step: int | None = None) -> torch.Tensor | SimpleNamespace:
+    def forward(
+        self, x: torch.Tensor, global_step: int | None = None
+    ) -> torch.Tensor | SimpleNamespace:
         if global_step is not None:
             base = x.mean()
-            return (base + self.bottleneck.weight.sum() * 0.0 + self.decoder.weight.sum() * 0.0).reshape(())
+            return (
+                base + self.bottleneck.weight.sum() * 0.0 + self.decoder.weight.sum() * 0.0
+            ).reshape(())
         amap = torch.ones(x.shape[0], 28, 28, device=x.device, dtype=x.dtype)
         score = torch.full((x.shape[0],), 0.42, device=x.device, dtype=x.dtype)
         return SimpleNamespace(anomaly_map=amap, pred_score=score)
@@ -101,7 +105,9 @@ def test_out_of_range_float_input_is_clamped_and_runs(patched_dinomaly: Dinomaly
 
 def test_training_loss_1d_scalar_is_flattened() -> None:
     class _Loss1D(_FakeDinomalyModel):
-        def forward(self, x: torch.Tensor, global_step: int | None = None) -> torch.Tensor | SimpleNamespace:
+        def forward(
+            self, x: torch.Tensor, global_step: int | None = None
+        ) -> torch.Tensor | SimpleNamespace:
             if global_step is not None:
                 return torch.tensor([0.5], device=x.device, dtype=x.dtype)
             return super().forward(x, global_step=global_step)
@@ -127,7 +133,9 @@ def test_freeze_then_unfreeze_encoder_stays_frozen(patched_dinomaly: DinomalyDet
     assert any(p.requires_grad for p in det.dinomaly_model.decoder.parameters())
 
 
-def test_eval_forward_uses_bchw_anomaly_map_with_channel_dim(patched_dinomaly: DinomalyDetector) -> None:
+def test_eval_forward_uses_bchw_anomaly_map_with_channel_dim(
+    patched_dinomaly: DinomalyDetector,
+) -> None:
     """Cover interpolate branch when anomaly_map is 4D [B,1,H,W]."""
 
     class _FourD(nn.Module):
@@ -137,7 +145,9 @@ def test_eval_forward_uses_bchw_anomaly_map_with_channel_dim(patched_dinomaly: D
             self.bottleneck = nn.Linear(1, 1, bias=False)
             self.decoder = nn.Linear(1, 1, bias=False)
 
-        def forward(self, x: torch.Tensor, global_step: int | None = None) -> torch.Tensor | SimpleNamespace:
+        def forward(
+            self, x: torch.Tensor, global_step: int | None = None
+        ) -> torch.Tensor | SimpleNamespace:
             if global_step is not None:
                 return x.mean().reshape(())
             amap = torch.ones(x.shape[0], 1, 7, 7, device=x.device, dtype=x.dtype)
@@ -152,5 +162,7 @@ def test_eval_forward_uses_bchw_anomaly_map_with_channel_dim(patched_dinomaly: D
     ):
         det = DinomalyDetector(encoder_name="fake")
     x = torch.rand(1, 20, 24, 3)
-    out = det(x, context=Context(stage=ExecutionStage.INFERENCE, epoch=0, batch_idx=0, global_step=0))
+    out = det(
+        x, context=Context(stage=ExecutionStage.INFERENCE, epoch=0, batch_idx=0, global_step=0)
+    )
     assert out["scores"].shape == (1, 20, 24, 1)

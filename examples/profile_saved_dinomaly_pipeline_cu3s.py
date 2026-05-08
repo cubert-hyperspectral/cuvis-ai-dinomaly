@@ -56,7 +56,9 @@ def main() -> None:
         default=None,
         help="Plugin manifest (default: examples/plugins.yaml)",
     )
-    ap.add_argument("--splits-csv", type=Path, default=Path("/home/dev/anish/cuvis-ai/lentils_splits.csv"))
+    ap.add_argument(
+        "--splits-csv", type=Path, default=Path("/home/dev/anish/cuvis-ai/lentils_splits.csv")
+    )
     ap.add_argument("--num-images", type=int, default=10)
     ap.add_argument("--warmup-images", type=int, default=2)
     ap.add_argument("--batch-size", type=int, default=1)
@@ -168,7 +170,13 @@ def main() -> None:
                     timed += 1
                     rec = records[ds_idx]
                     cu3s_path = rec.get("cu3s_path", "unknown")
-                    logger.info("[{:02d}/{:02d}] {} -> {} ms", timed, args.num_images, cu3s_path, _fmt(dt_ms))
+                    logger.info(
+                        "[{:02d}/{:02d}] {} -> {} ms",
+                        timed,
+                        args.num_images,
+                        cu3s_path,
+                        _fmt(dt_ms),
+                    )
 
                 processed += 1
 
@@ -200,4 +208,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

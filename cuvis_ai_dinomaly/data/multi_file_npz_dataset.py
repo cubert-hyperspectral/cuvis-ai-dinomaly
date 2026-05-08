@@ -158,4 +158,3 @@ class MultiFileNpzDataModule(pl.LightningDataModule):
         if self.test_ds is None:
             raise RuntimeError("Test dataset not initialized. Call setup('test').")
         return self._loader(self.test_ds, shuffle=False)
-

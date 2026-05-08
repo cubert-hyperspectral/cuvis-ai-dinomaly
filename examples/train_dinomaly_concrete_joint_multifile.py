@@ -46,12 +46,16 @@ class TrainOnlyDistinctnessLoss(Node):
             description="Selector weights [C_out, C_in].",
         )
     }
-    OUTPUT_SPECS = {"loss": PortSpec(dtype=torch.float32, shape=(), description="Distinctness loss")}
+    OUTPUT_SPECS = {
+        "loss": PortSpec(dtype=torch.float32, shape=(), description="Distinctness loss")
+    }
 
     def __init__(self, weight: float = 0.1, eps: float = 1e-6, **kwargs: Any) -> None:
         self.weight = float(weight)
         self.eps = float(eps)
-        super().__init__(execution_stages={ExecutionStage.TRAIN}, weight=self.weight, eps=self.eps, **kwargs)
+        super().__init__(
+            execution_stages={ExecutionStage.TRAIN}, weight=self.weight, eps=self.eps, **kwargs
+        )
 
     def forward(self, selection_weights: Tensor, **_: Any) -> dict[str, Tensor]:
         w_norm = F.normalize(selection_weights, p=2, dim=-1, eps=self.eps)
@@ -65,7 +69,11 @@ class TrainOnlyDistinctnessLoss(Node):
         return {"loss": self.weight * loss}
 
 
-@hydra.main(config_path="../configs", config_name="trainrun/dinomaly_multifile_concrete_joint", version_base=None)
+@hydra.main(
+    config_path="../configs",
+    config_name="trainrun/dinomaly_multifile_concrete_joint",
+    version_base=None,
+)
 def main(cfg: DictConfig) -> None:
     logger.info("=== Dinomaly + Concrete selector (joint + distinctness, standalone) ===")
 
@@ -87,18 +95,22 @@ def main(cfg: DictConfig) -> None:
         if "npz_path" in header:
             backend = "npz"
 
-    common_loader_kwargs = dict(
-        splits_csv=cfg.data.splits_csv,
-        batch_size=cfg.data.batch_size,
-        num_workers=int(cfg.data.get("num_workers", 0)),
-        pin_memory=bool(cfg.data.get("pin_memory", True)),
-        persistent_workers=bool(cfg.data.get("persistent_workers", True)),
-        worker_multiprocessing_context=str(cfg.data.get("worker_multiprocessing_context", "spawn")),
-    )
+    common_loader_kwargs = {
+        "splits_csv": cfg.data.splits_csv,
+        "batch_size": cfg.data.batch_size,
+        "num_workers": int(cfg.data.get("num_workers", 0)),
+        "pin_memory": bool(cfg.data.get("pin_memory", True)),
+        "persistent_workers": bool(cfg.data.get("persistent_workers", True)),
+        "worker_multiprocessing_context": str(
+            cfg.data.get("worker_multiprocessing_context", "spawn")
+        ),
+    }
     if backend == "npz":
         datamodule = MultiFileNpzDataModule(**common_loader_kwargs)
     else:
-        datamodule = MultiFileCu3sDataModule(**common_loader_kwargs, processing_mode=cfg.data.processing_mode)
+        datamodule = MultiFileCu3sDataModule(
+            **common_loader_kwargs, processing_mode=cfg.data.processing_mode
+        )
     datamodule.setup(stage="fit")
 
     first_batch = next(iter(datamodule.train_dataloader()))
@@ -107,7 +119,11 @@ def main(cfg: DictConfig) -> None:
     dcfg = cfg.dinomaly
     pipeline = CuvisPipeline("dinomaly_multifile_concrete_joint")
     data_node = LentilsAnomalyDataNode(normal_class_ids=[0])
-    normalizer = MinMaxNormalizer(eps=1e-6, use_running_stats=True, max_initialization_frames=cfg.get("minmax_init_frames", None))
+    normalizer = MinMaxNormalizer(
+        eps=1e-6,
+        use_running_stats=True,
+        max_initialization_frames=cfg.get("minmax_init_frames", None),
+    )
     selector = ConcreteChannelMixer(
         input_channels=input_channels,
         output_channels=int(cfg.get("concrete", {}).get("output_channels", 3)),
@@ -175,7 +191,11 @@ def main(cfg: DictConfig) -> None:
     if normalizer.requires_initial_fit:
         StatisticalTrainer(pipeline=pipeline, datamodule=datamodule).fit()
 
-    unfreeze = list(cfg.unfreeze_nodes) if "unfreeze_nodes" in cfg else ["dinomaly_detector", "concrete_selector"]
+    unfreeze = (
+        list(cfg.unfreeze_nodes)
+        if "unfreeze_nodes" in cfg
+        else ["dinomaly_detector", "concrete_selector"]
+    )
     if "concrete_selector" not in unfreeze:
         unfreeze.append("concrete_selector")
     if "dinomaly_detector" not in unfreeze:
@@ -215,4 +235,3 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
-

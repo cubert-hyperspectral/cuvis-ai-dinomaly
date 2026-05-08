@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
 import importlib.util
+import inspect
 from pathlib import Path
 
 PARITY_PATH = Path(__file__).resolve().parent / "test_parity.py"

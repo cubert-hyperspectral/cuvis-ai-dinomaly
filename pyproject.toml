@@ -22,6 +22,11 @@ dependencies = [
     "tqdm>=4.66.0",
     "defusedxml>=0.7.1",
     "open-clip-torch>=2.24.0",
+    # `requests` is an undeclared runtime dependency of anomalib 2.1.0:
+    # importing `anomalib.models.image.dinomaly.torch_model` triggers
+    # `anomalib.models.__init__` which eagerly loads the video chain
+    # (`anomalib.models.video.ai_vad.clip.clip` -> `import requests`).
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]

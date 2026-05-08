@@ -9,7 +9,6 @@ from typing import Literal
 
 import pytorch_lightning as pl
 import torch
-from lightning.pytorch.callbacks import Callback, ModelCheckpoint
 from cuvis_ai.data import MultiFileCu3sDataModule
 from cuvis_ai.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.channel_selector import CIRSelector, FixedWavelengthSelector
@@ -19,6 +18,7 @@ from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
+from cuvis_ai_core.training.config import create_callbacks_from_config
 from cuvis_ai_core.utils.node_registry import NodeRegistry
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import (
@@ -26,7 +26,7 @@ from cuvis_ai_schemas.training import (
     ModelCheckpointConfig,
     TrainingConfig,
 )
-from cuvis_ai_core.training.config import create_callbacks_from_config
+from lightning.pytorch.callbacks import Callback, ModelCheckpoint
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
@@ -51,7 +51,9 @@ class _LastCheckpointAuditCallback(Callback):
             entry: dict[str, object] = {
                 "dirpath": str(c.dirpath) if c.dirpath else None,
                 "last_model_path": str(last_p) if last_p else None,
-                "best_model_path": str(c.best_model_path) if getattr(c, "best_model_path", None) else None,
+                "best_model_path": str(c.best_model_path)
+                if getattr(c, "best_model_path", None)
+                else None,
             }
             if last_p and Path(last_p).is_file():
                 ck = torch.load(last_p, map_location="cpu", weights_only=False)
@@ -120,14 +122,16 @@ def run_dinomaly_multifile_training(
                 backend = "cu3s"
     else:
         backend = str(backend_cfg).lower()
-    common_loader_kwargs = dict(
-        splits_csv=cfg.data.splits_csv,
-        batch_size=cfg.data.batch_size,
-        num_workers=int(cfg.data.get("num_workers", 0)),
-        pin_memory=bool(cfg.data.get("pin_memory", True)),
-        persistent_workers=bool(cfg.data.get("persistent_workers", True)),
-        worker_multiprocessing_context=str(cfg.data.get("worker_multiprocessing_context", "spawn")),
-    )
+    common_loader_kwargs = {
+        "splits_csv": cfg.data.splits_csv,
+        "batch_size": cfg.data.batch_size,
+        "num_workers": int(cfg.data.get("num_workers", 0)),
+        "pin_memory": bool(cfg.data.get("pin_memory", True)),
+        "persistent_workers": bool(cfg.data.get("persistent_workers", True)),
+        "worker_multiprocessing_context": str(
+            cfg.data.get("worker_multiprocessing_context", "spawn")
+        ),
+    }
     if backend == "npz":
         datamodule = MultiFileNpzDataModule(**common_loader_kwargs)
     else:
@@ -244,7 +248,9 @@ def run_dinomaly_multifile_training(
 
     merged_callbacks: list | None = None
     if extra_callbacks:
-        merged_callbacks = list(create_callbacks_from_config(training_cfg.trainer.callbacks)) + extra_callbacks
+        merged_callbacks = (
+            list(create_callbacks_from_config(training_cfg.trainer.callbacks)) + extra_callbacks
+        )
 
     logger.info("Gradient training (Dinomaly bottleneck + decoder)...")
     grad_trainer = GradientTrainer(

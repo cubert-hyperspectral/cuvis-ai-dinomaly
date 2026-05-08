@@ -8,7 +8,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from cuvis_ai_dinomaly.data import MultiFileNpzDataModule, MultiFileNpzDataset
+# Guard the cuvis_ai.data import: cuvis_ai_dinomaly.data depends on
+# `cuvis_ai.data.multi_file_dataset` private helpers that are only present
+# in development versions of cuvis-ai, not in the version published on PyPI.
+# Skip the whole module cleanly when running against released cuvis-ai.
+pytest.importorskip(
+    "cuvis_ai.data.multi_file_dataset",
+    reason="requires unreleased cuvis_ai.data.multi_file_dataset helpers",
+)
+
+from cuvis_ai_dinomaly.data import MultiFileNpzDataModule, MultiFileNpzDataset  # noqa: E402
 
 
 def _write_npz(path: Path, *, with_mask: bool) -> None:
@@ -30,9 +39,33 @@ def _write_splits_csv(path: Path, npz_train: Path, npz_val: Path, npz_test: Path
             fieldnames=["split", "npz_path", "cu3s_path", "annotation_json", "image_id"],
         )
         w.writeheader()
-        w.writerow({"split": "train", "npz_path": str(npz_train), "cu3s_path": "a.cu3s", "annotation_json": "", "image_id": 1})
-        w.writerow({"split": "val", "npz_path": str(npz_val), "cu3s_path": "b.cu3s", "annotation_json": "", "image_id": 2})
-        w.writerow({"split": "test", "npz_path": str(npz_test), "cu3s_path": "c.cu3s", "annotation_json": "", "image_id": 3})
+        w.writerow(
+            {
+                "split": "train",
+                "npz_path": str(npz_train),
+                "cu3s_path": "a.cu3s",
+                "annotation_json": "",
+                "image_id": 1,
+            }
+        )
+        w.writerow(
+            {
+                "split": "val",
+                "npz_path": str(npz_val),
+                "cu3s_path": "b.cu3s",
+                "annotation_json": "",
+                "image_id": 2,
+            }
+        )
+        w.writerow(
+            {
+                "split": "test",
+                "npz_path": str(npz_test),
+                "cu3s_path": "c.cu3s",
+                "annotation_json": "",
+                "image_id": 3,
+            }
+        )
 
 
 def test_npz_dataset_reads_mask_and_wavelengths(tmp_path: Path) -> None:
