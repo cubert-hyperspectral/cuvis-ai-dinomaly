@@ -45,6 +45,22 @@ jobs:
         run: uv run --no-sources --extra dev python -c "import cuvis_ai_core"
       - name: Diagnostic — import cuvis_ai
         run: uv run --no-sources --extra dev python -c "import cuvis_ai"
+      # Top-level imports of cuvis_ai_dinomaly.node.dinomaly_detector, one
+      # per step, to isolate which one fails on Linux.
+      - name: Diagnostic — from cuvis_ai_core.node.node import Node
+        run: uv run --no-sources --extra dev python -c "from cuvis_ai_core.node.node import Node"
+      - name: Diagnostic — import cuvis_ai_schemas
+        run: uv run --no-sources --extra dev python -c "import cuvis_ai_schemas; print(getattr(cuvis_ai_schemas, '__version__', 'no version attr'))"
+      - name: Diagnostic — from cuvis_ai_schemas.enums import ExecutionStage
+        run: uv run --no-sources --extra dev python -c "from cuvis_ai_schemas.enums import ExecutionStage"
+      - name: Diagnostic — from cuvis_ai_schemas.execution import Context
+        run: uv run --no-sources --extra dev python -c "from cuvis_ai_schemas.execution import Context"
+      - name: Diagnostic — from cuvis_ai_schemas.pipeline import PortSpec
+        run: uv run --no-sources --extra dev python -c "from cuvis_ai_schemas.pipeline import PortSpec"
+      - name: Diagnostic — import loguru
+        run: uv run --no-sources --extra dev python -c "from loguru import logger"
+      - name: Diagnostic — import torchvision.transforms.v2
+        run: uv run --no-sources --extra dev python -c "from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize"
       - name: Diagnostic — import DinomalyDetector
         run: uv run --no-sources --extra dev python -c "from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector"
 
