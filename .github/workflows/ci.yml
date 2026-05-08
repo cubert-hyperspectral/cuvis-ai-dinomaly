@@ -29,23 +29,24 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Diagnostic — versions and import chain
-        # Surfaces the actual failing import (if any) before pytest runs,
-        # so the cause is visible in the public step output without log auth.
-        run: |
-          uv run --no-sources --extra dev python -c "
-          import sys, platform
-          print('python', sys.version)
-          print('platform', platform.platform())
-          import torch; print('torch', torch.__version__)
-          import anomalib; print('anomalib', anomalib.__version__)
-          import requests; print('requests', requests.__version__)
-          from anomalib.models.image.dinomaly.torch_model import DinomalyModel
-          print('DinomalyModel import: ok')
-          import cuvis_ai_core; print('cuvis_ai_core ok')
-          from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector
-          print('DinomalyDetector import: ok')
-          "
+      # Each import is its own step so the failing step's name in the
+      # (auth-free) job summary directly identifies the broken import.
+      - name: Diagnostic — import torch
+        run: uv run --no-sources --extra dev python -c "import torch; print(torch.__version__)"
+      - name: Diagnostic — import requests
+        run: uv run --no-sources --extra dev python -c "import requests; print(requests.__version__)"
+      - name: Diagnostic — import anomalib
+        run: uv run --no-sources --extra dev python -c "import anomalib; print(anomalib.__version__)"
+      - name: Diagnostic — import anomalib.models
+        run: uv run --no-sources --extra dev python -c "import anomalib.models"
+      - name: Diagnostic — import DinomalyModel
+        run: uv run --no-sources --extra dev python -c "from anomalib.models.image.dinomaly.torch_model import DinomalyModel"
+      - name: Diagnostic — import cuvis_ai_core
+        run: uv run --no-sources --extra dev python -c "import cuvis_ai_core"
+      - name: Diagnostic — import cuvis_ai
+        run: uv run --no-sources --extra dev python -c "import cuvis_ai"
+      - name: Diagnostic — import DinomalyDetector
+        run: uv run --no-sources --extra dev python -c "from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector"
 
       - name: Run focused tests
         # `-m "not slow"` keeps `integration` enabled so the manifest-loading
