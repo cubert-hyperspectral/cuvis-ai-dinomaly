@@ -8,9 +8,10 @@ from typing import Any
 
 import numpy as np
 import pytorch_lightning as pl
-from cuvis_ai_dinomaly.data._coco_utils import _build_category_mask, _parse_coco_json
 from loguru import logger
 from torch.utils.data import DataLoader, Dataset
+
+from cuvis_ai_dinomaly.data._coco_utils import _build_category_mask, _parse_coco_json
 
 
 class MultiFileNpzDataset(Dataset):
