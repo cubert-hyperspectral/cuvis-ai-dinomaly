@@ -8,16 +8,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Guard the cuvis_ai.data import: cuvis_ai_dinomaly.data depends on
-# `cuvis_ai.data.multi_file_dataset` private helpers that are only present
-# in development versions of cuvis-ai, not in the version published on PyPI.
-# Skip the whole module cleanly when running against released cuvis-ai.
-pytest.importorskip(
-    "cuvis_ai.data.multi_file_dataset",
-    reason="requires unreleased cuvis_ai.data.multi_file_dataset helpers",
-)
-
-from cuvis_ai_dinomaly.data import MultiFileNpzDataModule, MultiFileNpzDataset  # noqa: E402
+from cuvis_ai_dinomaly.data import MultiFileNpzDataModule, MultiFileNpzDataset
+from cuvis_ai_dinomaly.data._coco_utils import _build_category_mask
 
 
 def _write_npz(path: Path, *, with_mask: bool) -> None:
@@ -130,3 +122,22 @@ def test_datamodule_raises_if_loader_called_before_setup(tmp_path: Path) -> None
         dm.val_dataloader()
     with pytest.raises(RuntimeError):
         dm.test_dataloader()
+
+
+def test_build_category_mask_empty_returns_zeros() -> None:
+    mask = _build_category_mask([], height=5, width=6)
+    assert mask.shape == (5, 6)
+    assert mask.dtype == np.int32
+    assert np.all(mask == 0)
+
+
+def test_build_category_mask_bbox_fills_region() -> None:
+    # bbox: [x=2, y=1, w=4, h=3] → x1=2,y1=1,x2=6,y2=4
+    anns = [{"category_id": 3, "bbox": [2, 1, 4, 3], "segmentation": []}]
+    mask = _build_category_mask(anns, height=8, width=10)
+    # interior pixel
+    assert mask[1, 2] == 3
+    assert mask[3, 5] == 3
+    # outside
+    assert mask[0, 0] == 0
+    assert mask[4, 2] == 0
