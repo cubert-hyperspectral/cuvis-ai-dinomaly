@@ -3,13 +3,23 @@
 import os
 
 import pytest
-import torch
-import torch.nn.functional as F
-from anomalib.models.image.dinomaly.torch_model import DinomalyModel
-from cuvis_ai_schemas.enums import ExecutionStage
-from cuvis_ai_schemas.execution import Context
 
-from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector
+# Guard the anomalib import: anomalib.models.__init__ eagerly pulls in the
+# video-model package, which transitively `import requests`. CI envs that
+# don't have `requests` (or anomalib's optional video deps) installed would
+# fail collection of this whole module before the slow-marker filter applies.
+_anomalib_torch_model = pytest.importorskip(
+    "anomalib.models.image.dinomaly.torch_model",
+    reason="anomalib + transitive deps not fully installed in this env",
+)
+DinomalyModel = _anomalib_torch_model.DinomalyModel
+
+import torch  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
+from cuvis_ai_schemas.enums import ExecutionStage  # noqa: E402
+from cuvis_ai_schemas.execution import Context  # noqa: E402
+
+from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector  # noqa: E402
 
 requires_weights = pytest.mark.skipif(
     os.environ.get("CUVIS_DINOMALY_SKIP_SLOW", "") == "1",

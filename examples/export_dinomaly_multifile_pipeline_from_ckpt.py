@@ -35,10 +35,10 @@ from cuvis_ai.node.normalization import MinMaxNormalizer
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_schemas.pipeline import PipelineMetadata
-from cuvis_ai_schemas.training import TrainingConfig
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
+from cuvis_ai_schemas.pipeline import PipelineMetadata
+from cuvis_ai_schemas.training import TrainingConfig
 from loguru import logger
 from omegaconf import OmegaConf
 
@@ -81,14 +81,16 @@ def build_pipeline_and_datamodule(
     backend = _infer_backend(splits_csv_path)
     # Export runs a fresh StatisticalTrainer pass; NPZ dataset + spawn workers often
     # hit PicklingError (same as full training). Use a single-threaded loader here.
-    common_loader_kwargs = dict(
-        splits_csv=str(splits_csv_path),
-        batch_size=int(cfg.data.batch_size),
-        num_workers=0,
-        pin_memory=bool(cfg.data.get("pin_memory", True)),
-        persistent_workers=False,
-        worker_multiprocessing_context=str(cfg.data.get("worker_multiprocessing_context", "spawn")),
-    )
+    common_loader_kwargs = {
+        "splits_csv": str(splits_csv_path),
+        "batch_size": int(cfg.data.batch_size),
+        "num_workers": 0,
+        "pin_memory": bool(cfg.data.get("pin_memory", True)),
+        "persistent_workers": False,
+        "worker_multiprocessing_context": str(
+            cfg.data.get("worker_multiprocessing_context", "spawn")
+        ),
+    }
     if backend == "npz":
         datamodule = MultiFileNpzDataModule(**common_loader_kwargs)
     else:
@@ -272,7 +274,9 @@ def main() -> None:
     if missing:
         logger.warning("load_state_dict missing ({}): {}", len(missing), list(missing)[:20])
     if unexpected:
-        logger.warning("load_state_dict unexpected ({}): {}", len(unexpected), list(unexpected)[:20])
+        logger.warning(
+            "load_state_dict unexpected ({}): {}", len(unexpected), list(unexpected)[:20]
+        )
 
     yaml_path = out_dir / f"{pipeline.name}.yaml"
     pipeline.save_to_file(
