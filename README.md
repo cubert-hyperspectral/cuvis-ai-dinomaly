@@ -59,7 +59,7 @@ plugins:
 plugins:
   dinomaly:
     repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly.git"
-    tag: "v0.1.3"
+    tag: "v0.1.4"
     provides:
       - cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
       - cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge

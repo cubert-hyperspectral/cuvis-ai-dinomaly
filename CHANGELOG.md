@@ -4,15 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.1.4 - 2026-05-11
+
+- **Fix (critical):** Inlined `_build_category_mask` and `_parse_coco_json` into `cuvis_ai_dinomaly/data/_coco_utils.py`. These were previously imported from `cuvis_ai.data.multi_file_dataset` which does not exist in the released `cuvis-ai` package, causing a silent `ImportError` at runtime for any pipeline using `MultiFileNpzDataModule`. Removed the `pytest.importorskip` guard that was hiding the failure in CI — datamodule tests now run unconditionally.
+- Added two new unit tests for `_build_category_mask` (empty annotations → zero mask; bbox annotation → correct region fill).
+- Removed dead `cuvis-ai = { path = "../cuvis-ai", editable = true }` entry from `[tool.uv.sources]` in `pyproject.toml` (`cuvis-ai` was dropped as a runtime dep in 0.1.3 but its source override lingered).
+- Added inline comment in `pyproject.toml` explaining the `<3.12` Python cap: `anomalib==2.1.0` and `kornia==0.6.12` are tested on 3.11 only; the kornia pin avoids `kornia-rs` illegal instruction on CI runners.
+- Added `pre_trained/` to `.gitignore`.
+- Replaced hardcoded developer paths (`/home/dev/anish/…`, `/mnt/data/…`) in all six `configs/trainrun/*.yaml` files with placeholder comments.
+- Rewrote `docs/publish_checklist.md` to be version-agnostic (`vX.Y.Z` placeholders, no personal paths). Added steps for compatibility audit (§8) and registry update.
+- Added coverage to the CI `test` job: `--cov=cuvis_ai_dinomaly --cov-report=xml --cov-report=term-missing --cov-fail-under=70`. Coverage XML artifact uploaded for 7 days.
+- Lowered `[tool.coverage.report] fail_under` from 90 to 70 to match the CI gate.
+- Added `tags-ignore: ["v*.*.*"]` to `ci.yml` `on.push` so tag pushes no longer re-run CI (the new `release.yml` handles that).
+- Added `.github/workflows/release.yml`: tag-triggered (`v*.*.*`), runs jobs `validate` → `security` → `build` (with tag-vs-package-version check) → `create-release` (extracts the matching CHANGELOG section as GitHub Release notes).
+- Recorded compatibility audit against `cuvis-ai-core` 0.1.0 and 0.5.2 in [`docs/compatibility_audit.md`](docs/compatibility_audit.md). Result: PASS — every shared dep (`numpy`, `tqdm`, `defusedxml`, `requests`) satisfies the plugin's specifier; `anomalib`, `kornia`, `opencv-python`, `open-clip-torch` are not in either core lock so no conflict risk.
 - Extended CI to adaclip-level: added `typecheck` (mypy, non-blocking) and `security` (pip-audit, detect-secrets, bandit) jobs. The `build` job now gates on all four hygiene jobs. Added `.secrets.baseline` (zero findings) and a `[tool.bandit]` config block. Dev-deps grew with `mypy`, `pip-audit`, `detect-secrets`, `bandit[toml]`.
 - Added `LICENSE` file (Apache-2.0 standard text + Cubert GmbH copyright) at repo root. `pyproject.toml` already declared `license = "Apache-2.0"` but the license text was not previously distributed.
 - Added a **Plugin manifest** section to `README.md` documenting both local-path and git-tag manifest forms (skill §9 / "When to stop" requirement).
-- Recorded compatibility audit against `cuvis-ai-core` 0.1.0 and 0.5.2 in [`docs/compatibility_audit.md`](docs/compatibility_audit.md). Result: PASS — every shared dep (`numpy`, `tqdm`, `defusedxml`, `requests`) satisfies the plugin's specifier; `anomalib`, `kornia`, `opencv-python`, `open-clip-torch` are not in either core lock so no conflict risk.
 - Added CI (`ci.yml`) workflow with `test`, `lint`, and `build` jobs (Ubuntu / Python 3.11 / `uv` with `--no-sources`). Test job runs `pytest tests/ -m "not slow"` so the `integration`-marked manifest-loading smoke test executes per the cuvis-ai plugin skill verification step.
 - Dropped runtime dependency on the high-level `cuvis-ai` package and added `cuvis-ai-schemas>=0.4.0`. The plugin now depends only on `cuvis-ai-core` + `cuvis-ai-schemas`, matching `cuvis-ai-deepeiou` / `cuvis-ai-sam3`. Avoids transitively importing the proprietary Cuvis SDK (`cuvis_il`) at module load.
 - Inlined a minimal `_LossNode` in `dinomaly_train_loss_bridge.py` mirroring `cuvis_ai.node.losses.LossNode` (marker subclass that defaults `execution_stages = {TRAIN, VAL, TEST}` on `Node.__init__`). No behavior change for consumers.
 - Added `requests>=2.31.0` to runtime dependencies (undeclared transitive of `anomalib==2.1.0` via the eager `anomalib.models.video.ai_vad.clip` import chain).
-- Added `pytest.importorskip` guards at the top of `tests/test_parity.py` and `tests/test_npz_datamodule.py` so collection skips cleanly when their respective heavy deps aren't fully resolved.
 - Replaced `tests/test_parity_markers.py` `importlib.spec_from_file_location` + `exec_module` with `ast.parse`-based static inspection so the marker-checks no longer re-execute `test_parity.py` at collection time.
 - Ran `ruff format` over `cuvis_ai_dinomaly/`, `tests/`, `examples/` and applied `ruff check --fix --unsafe-fixes` (4 import sorts + 5 `dict()` → `{}` rewrites in example training scripts).
 

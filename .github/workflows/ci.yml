@@ -3,6 +3,8 @@ name: Continuous Integration
 on:
   push:
     branches: [main]
+    tags-ignore:
+      - "v*.*.*"
   pull_request:
     branches: [main]
 
@@ -35,11 +37,22 @@ jobs:
         # is the verification step required by the cuvis-ai-plugin skill.
         # `--no-sources` ignores the local-path overrides under
         # [tool.uv.sources] in pyproject.toml so PyPI/Git indexes are used.
-        # `--locked` is intentionally omitted: the committed uv.lock was
-        # generated with local [tool.uv.sources] paths active, which conflicts
-        # with --no-sources. Re-add --locked once the lock is regenerated
-        # against the public indexes.
-        run: uv run --no-sources --extra dev pytest tests/ -m "not slow" -v --tb=long -ra
+        # `--locked` uses the committed uv.lock (generated with --no-sources)
+        # to keep CI fully reproducible.
+        run: |
+          uv run --no-sources --locked --extra dev pytest tests/ -m "not slow" -v --tb=long -ra \
+            --cov=cuvis_ai_dinomaly \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 7
 
   lint:
     name: Focused Ruff Checks
@@ -58,10 +71,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Check formatting
-        run: uv run --no-sources --extra dev ruff format --check cuvis_ai_dinomaly tests examples
+        run: uv run --no-sources --locked --extra dev ruff format --check cuvis_ai_dinomaly tests examples
 
       - name: Run ruff
-        run: uv run --no-sources --extra dev ruff check cuvis_ai_dinomaly tests examples
+        run: uv run --no-sources --locked --extra dev ruff check cuvis_ai_dinomaly tests examples
 
   typecheck:
     name: Type checking
@@ -81,7 +94,7 @@ jobs:
       - name: Run mypy
         # Non-blocking: anomalib / torch stubs are incomplete; surface issues
         # without gating CI (matches cuvis-ai-adaclip pattern).
-        run: uv run --no-sources --extra dev mypy cuvis_ai_dinomaly/ || true
+        run: uv run --no-sources --locked --extra dev mypy cuvis_ai_dinomaly/ || true
 
   security:
     name: Security scanning
@@ -101,13 +114,13 @@ jobs:
       - name: Run pip-audit
         # Non-blocking: anomalib==2.1.0 / kornia==0.6.12 may carry transient
         # CVEs we cannot patch without breaking compatibility.
-        run: uv run --no-sources --extra dev pip-audit --strict --desc on || true
+        run: uv run --no-sources --locked --extra dev pip-audit --strict --desc on || true
 
       - name: Run detect-secrets
-        run: uv run --no-sources --extra dev detect-secrets scan --baseline .secrets.baseline
+        run: uv run --no-sources --locked --extra dev detect-secrets scan --baseline .secrets.baseline
 
       - name: Run bandit
-        run: uv run --no-sources --extra dev bandit -r cuvis_ai_dinomaly/ -c pyproject.toml || true
+        run: uv run --no-sources --locked --extra dev bandit -r cuvis_ai_dinomaly/ -c pyproject.toml || true
 
   build:
     name: Build And Validate
