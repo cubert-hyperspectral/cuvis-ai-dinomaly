@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## 0.1.4 - 2026-05-11
 
+- Switched runtime dep from `opencv-python>=4.8.0` to `opencv-python-headless>=4.13.0.92` to match `cuvis-ai-sam3` / `cuvis-ai-adaclip`. The plugin has no `cv2.imshow` / window calls so the GUI subdeps (`libGL`, `libGTK`) were dead weight.
 - **Fix (critical):** Inlined `_build_category_mask` and `_parse_coco_json` into `cuvis_ai_dinomaly/data/_coco_utils.py`. These were previously imported from `cuvis_ai.data.multi_file_dataset` which does not exist in the released `cuvis-ai` package, causing a silent `ImportError` at runtime for any pipeline using `MultiFileNpzDataModule`. Removed the `pytest.importorskip` guard that was hiding the failure in CI — datamodule tests now run unconditionally.
 - Added two new unit tests for `_build_category_mask` (empty annotations → zero mask; bbox annotation → correct region fill).
 - Removed dead `cuvis-ai = { path = "../cuvis-ai", editable = true }` entry from `[tool.uv.sources]` in `pyproject.toml` (`cuvis-ai` was dropped as a runtime dep in 0.1.3 but its source override lingered).
@@ -17,7 +18,7 @@ All notable changes to this project will be documented in this file.
 - Lowered `[tool.coverage.report] fail_under` from 90 to 70 to match the CI gate.
 - Added `tags-ignore: ["v*.*.*"]` to `ci.yml` `on.push` so tag pushes no longer re-run CI (the new `release.yml` handles that).
 - Added `.github/workflows/release.yml`: tag-triggered (`v*.*.*`), runs jobs `validate` → `security` → `build` (with tag-vs-package-version check) → `create-release` (extracts the matching CHANGELOG section as GitHub Release notes).
-- Recorded compatibility audit against `cuvis-ai-core` 0.1.0 and 0.5.2 in [`docs/compatibility_audit.md`](docs/compatibility_audit.md). Result: PASS — every shared dep (`numpy`, `tqdm`, `defusedxml`, `requests`) satisfies the plugin's specifier; `anomalib`, `kornia`, `opencv-python`, `open-clip-torch` are not in either core lock so no conflict risk.
+- Recorded compatibility audit against `cuvis-ai-core` 0.1.0 and 0.5.2 in [`docs/compatibility_audit.md`](docs/compatibility_audit.md). Result: PASS — every shared dep (`numpy`, `tqdm`, `defusedxml`, `requests`) satisfies the plugin's specifier; `anomalib`, `kornia`, `opencv-python-headless`, `open-clip-torch` are not in either core lock so no conflict risk.
 - Extended CI to adaclip-level: added `typecheck` (mypy, non-blocking) and `security` (pip-audit, detect-secrets, bandit) jobs. The `build` job now gates on all four hygiene jobs. Added `.secrets.baseline` (zero findings) and a `[tool.bandit]` config block. Dev-deps grew with `mypy`, `pip-audit`, `detect-secrets`, `bandit[toml]`.
 - Added `LICENSE` file (Apache-2.0 standard text + Cubert GmbH copyright) at repo root. `pyproject.toml` already declared `license = "Apache-2.0"` but the license text was not previously distributed.
 - Added a **Plugin manifest** section to `README.md` documenting both local-path and git-tag manifest forms (skill §9 / "When to stop" requirement).
