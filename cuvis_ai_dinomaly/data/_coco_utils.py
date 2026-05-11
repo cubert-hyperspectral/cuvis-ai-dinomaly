@@ -29,9 +29,7 @@ def _parse_coco_json(path: Path) -> dict[str, Any]:
     return {"anns_by_image": anns_by_image}
 
 
-def _build_category_mask(
-    anns: list[dict[str, Any]], height: int, width: int
-) -> np.ndarray:
+def _build_category_mask(anns: list[dict[str, Any]], height: int, width: int) -> np.ndarray:
     """Build a ``[H, W]`` int32 category mask from COCO annotations.
 
     Polygon segmentation takes priority; falls back to bbox when no
