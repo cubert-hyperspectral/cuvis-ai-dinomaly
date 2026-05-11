@@ -54,6 +54,15 @@ jobs:
           path: coverage.xml
           retention-days: 7
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
   lint:
     name: Focused Ruff Checks
     runs-on: ubuntu-latest

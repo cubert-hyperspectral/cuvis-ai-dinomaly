@@ -1,13 +1,11 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-## Unreleased
+## [Unreleased]
 
 ## 0.1.4 - 2026-05-11
 
 - Switched runtime dep from `opencv-python>=4.8.0` to `opencv-python-headless>=4.13.0.92` to match `cuvis-ai-sam3` / `cuvis-ai-adaclip`. The plugin has no `cv2.imshow` / window calls so the GUI subdeps (`libGL`, `libGTK`) were dead weight.
-- **Fix (critical):** Inlined `_build_category_mask` and `_parse_coco_json` into `cuvis_ai_dinomaly/data/_coco_utils.py`. These were previously imported from `cuvis_ai.data.multi_file_dataset` which does not exist in the released `cuvis-ai` package, causing a silent `ImportError` at runtime for any pipeline using `MultiFileNpzDataModule`. Removed the `pytest.importorskip` guard that was hiding the failure in CI — datamodule tests now run unconditionally.
+- Fixed silent `ImportError` in `MultiFileNpzDataModule` by inlining `_build_category_mask` and `_parse_coco_json` into `cuvis_ai_dinomaly/data/_coco_utils.py`. These were previously imported from `cuvis_ai.data.multi_file_dataset` which does not exist in the released `cuvis-ai` package. Removed the `pytest.importorskip` guard that was hiding the failure in CI — datamodule tests now run unconditionally.
 - Added two new unit tests for `_build_category_mask` (empty annotations → zero mask; bbox annotation → correct region fill).
 - Removed dead `cuvis-ai = { path = "../cuvis-ai", editable = true }` entry from `[tool.uv.sources]` in `pyproject.toml` (`cuvis-ai` was dropped as a runtime dep in 0.1.3 but its source override lingered).
 - Added inline comment in `pyproject.toml` explaining the `<3.12` Python cap: `anomalib==2.1.0` and `kornia==0.6.12` are tested on 3.11 only; the kornia pin avoids `kornia-rs` illegal instruction on CI runners.
