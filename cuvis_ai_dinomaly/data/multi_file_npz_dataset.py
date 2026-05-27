@@ -3,14 +3,45 @@
 from __future__ import annotations
 
 import csv
+import json
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytorch_lightning as pl
-from cuvis_ai.data.multi_file_dataset import _build_category_mask, _parse_coco_json
 from loguru import logger
+from skimage.draw import polygon2mask
 from torch.utils.data import DataLoader, Dataset
+
+
+def _parse_coco_json(json_path: Path) -> dict[str, Any]:
+    with json_path.open(encoding="utf-8") as f:
+        data = json.load(f)
+    anns_by_image: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for ann in data.get("annotations", []):
+        anns_by_image[int(ann["image_id"])].append(ann)
+    cat_map = {int(c["id"]): str(c["name"]) for c in data.get("categories", [])}
+    return {"anns_by_image": dict(anns_by_image), "cat_map": cat_map}
+
+
+def _build_category_mask(anns: list[dict[str, Any]], h: int, w: int) -> np.ndarray:
+    mask = np.zeros((h, w), dtype=np.int32)
+    for ann in anns:
+        cat_id = int(ann.get("category_id", 0))
+        segs = ann.get("segmentation", [])
+        if not isinstance(segs, list):
+            continue
+        for seg in segs:
+            if not isinstance(seg, list) or len(seg) < 6:
+                continue
+            xy = np.asarray(seg, dtype=np.float32).reshape(-1, 2)
+            try:
+                poly = polygon2mask((h, w), xy[:, [1, 0]])
+                mask[poly] = cat_id
+            except Exception:
+                continue
+    return mask
 
 
 class MultiFileNpzDataset(Dataset):
