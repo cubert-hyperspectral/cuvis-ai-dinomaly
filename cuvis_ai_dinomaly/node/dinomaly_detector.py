@@ -153,14 +153,19 @@ class DinomalyDetector(Node):
         if x.dtype != torch.float32:
             x = x.float()
         max_val = float(x.max())
-        # Backward-compatible behavior:
-        # - [0,1] input: unchanged
-        # - [0,255]-like input: divide by 255 (legacy path)
-        # - values above 255: robustly scale by observed max
-        if max_val > 255.0:
+        # Scale to [0, 1] robustly by dividing by the per-cube max whenever it
+        # exceeds 1.0. This handles lentils-style uint16 reflectance (max ~10000),
+        # bedding-style float reflectance with specular highlights (max ~38000),
+        # and legacy uint8 RGB (max ~255) uniformly — for fully-saturated uint8
+        # input this is mathematically identical to the old "/ 255" path, and
+        # for under-saturated uint8 input the slightly higher contrast is
+        # absorbed by the downstream ImageNet normalize.
+        # IMPORTANT: do NOT pre-scale reflectance to [0, 1] in the dataset/
+        # converter — store the raw cuvis output (u16-encoded reflectance or
+        # equivalent) so this branch fires and per-cube max-scaling stays
+        # consistent across the codebase.
+        if max_val > 1.0:
             x = x / max_val
-        elif max_val > 1.0:
-            x = x / 255.0
         x = x.clamp(0.0, 1.0)
         x = x.permute(0, 3, 1, 2)
         return self._preprocess(x)

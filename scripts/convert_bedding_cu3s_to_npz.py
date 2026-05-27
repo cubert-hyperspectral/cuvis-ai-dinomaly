@@ -3,12 +3,21 @@
 Conforms to `MultiFileNpzDataset` schema (cuvis_ai_dinomaly.data.multi_file_npz_dataset).
 
 For each input cu3s:
-  1. Load `(2400, 4900, 6)` uint16 cube via cuvis.SessionFile.
+  1. Load `(2400, 4900, 6)` uint16 cube via cuvis.SessionFile. The cu3s already
+     carry the reflectance calibration; cuvis returns reflectance × 10000
+     (uint16, max ~38000 with specular highlights). This matches lentils
+     convention (max ~10000) so the downstream pipeline behaves consistently.
   2. Crop tray borders: `cube[300:-300, 300:-300, :]` → `(1800, 4300, 6)`.
-  3. Cast to float32 and divide by 10000 (NO `*0.55` factor — Dinomaly handles its own
-     ImageNet normalisation; the white-target factor is EAD-specific).
-  4. **No clipping** — bedding has specular highlights up to ~1.55 reflectance.
-     Decision 2026-05-26 (see /mnt/data/bedding_dataset/SESSION_LOG.md Q6).
+  3. Cast to float32 only (NO divide-by-10000, NO 0.55 factor).
+     Rationale (decision 2026-05-27): DinomalyDetector's
+     `_rgb_bhwc_to_model_input` does per-cube max-scaling to [0, 1] before
+     ImageNet normalisation. Pre-dividing by 10000 here would land us at
+     values 0–~3.2 — the auto-scaler's old uint8 path would treat that as
+     [0, 255] and crush everything to ~0. Keeping the raw u16-equivalent
+     max (~38000) ensures the auto-scaler does `x / max_val` cleanly. EAD's
+     `* 0.55 / 10000` step is independent of this change.
+  4. **No clipping.** Specular highlights (~p99 = 16500 in u16 reflectance
+     scale = 1.65 in raw reflectance) preserved.
   5. **No spatial resize** — keep full (1800, 4300, 6). The DinomalyDetector node
      applies Resize → CenterCrop → Normalize at training time.
   6. Find the binary mask: cube-side `<id>_mask.png` → fallback RGB-side
@@ -43,7 +52,6 @@ import numpy as np
 from PIL import Image
 
 EAD_CROP = (slice(300, -300), slice(300, -300), slice(None))
-SCALE = 10000.0
 EXPECTED_WL = [450, 550, 625, 1050, 1200, 1450]
 
 
@@ -76,7 +84,8 @@ def convert_one(cu3s: Path, labels_dir: Path, out_dir: Path,
         raise ValueError(f"shape mismatch on {cu3s.name}: {cube_u16.shape}")
 
     # Crop, cast, scale — NO 0.55, NO clip
-    cube_cropped = cube_u16[EAD_CROP].astype(np.float32) / SCALE
+    # Cast to float32; do NOT scale — see module docstring for rationale.
+    cube_cropped = cube_u16[EAD_CROP].astype(np.float32)
     # Shape now (1800, 4300, 6)
 
     # Mask
