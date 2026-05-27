@@ -1,0 +1,27 @@
+name: test # name of the report
+
+### DATASET ###
+datasets: [ /mnt/data/bedding_dataset/exported/val ]
+normalize: True # weather to normalize the data or not before putting it through the network
+means: [ 0.31257936, 0.43269954, 0.50889452, 0.64886759, 0.5958548, 0.39783356 ] # calculated mean per channel for the given dataset
+stds: [ 0.13495414, 0.17394394, 0.19844727, 0.21376508, 0.19457226, 0.13772688 ] # calculated standard deviation per channel for the given dataset
+channels: ALL # which channels to use, 'ALL' for 6 channel models, 'RGB' or 'SWIR' for 3 channel models
+max_img_shape: 3000 # make this the same size the model was trained with
+
+### MODEL ###
+Model:
+  checkpoints: best_teacher_6_channel.pth # checkpoint of the pretrained teacher
+  model_size: medium # wich model size to use, either 'medium' or 'small'
+  batch_size: 1 # this should always be 1 for EfficientAD
+  channel_size: 384 # number of teacher output channels
+  in_channels: 6 # number of input channels to the model
+  use_imgNet_penalty: True # weather to use the imageNet loss penalty in training, this is set for compatibility reasons
+seed: 42
+checkpoint_to_load: /mnt/data/bedding_dataset/EAD_model.ckpt # locally-supplied EAD checkpoint
+
+### REPORT ###
+create_images: true # whether to create inference and overlay images
+plot_thresholds: [ 0.5,0.4,0.3 ] # which thresholds to plot
+overlay: RGB # which image part to use for the overlay, either 'RGB' or 'SWIR'
+create_roc: true # whether to create ROC curves for images
+annotations: ./annotations.json
