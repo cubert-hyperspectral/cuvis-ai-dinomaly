@@ -5,3 +5,5 @@ plugins:
     provides:
       - cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
       - cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+      - cuvis_ai_dinomaly.node.selectors.FixedHyperspectralSelector
+      - cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
