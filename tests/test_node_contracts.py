@@ -14,7 +14,10 @@ def test_detector_port_specs_contract() -> None:
 
     assert set(ins.keys()) == {"rgb_image"}
     assert ins["rgb_image"].dtype == torch.float32
-    assert ins["rgb_image"].shape == (-1, -1, -1, 3)
+    # Channel-axis became -1 (variable) when input_channels was added so the same
+    # spec covers both the default 3-channel RGB path and the inflated 6-channel
+    # bedding-all6 path. C is validated at forward time against detector.input_channels.
+    assert ins["rgb_image"].shape == (-1, -1, -1, -1)
 
     assert {"scores", "anomaly_score", "training_loss"} <= set(outs.keys())
     assert outs["scores"].shape == (-1, -1, -1, 1)
