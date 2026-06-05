@@ -84,6 +84,11 @@ class MultiFileNpzDataset(Dataset):
             cube = np.asarray(z["cube"], dtype=np.float32)
             wavelengths = np.asarray(z["wavelengths"]).ravel().astype(np.int32, copy=False)
             mask_from_npz = np.asarray(z["mask"], dtype=np.int32) if "mask" in z.files else None
+            # Multi-class mask (uint8) preserved by convert_bedding_cu3s_to_npz.py for
+            # per-class evaluation. Absent on the all-background val frames.
+            class_mask_from_npz = (
+                np.asarray(z["class_mask"], dtype=np.uint8) if "class_mask" in z.files else None
+            )
 
         mask: np.ndarray
         if mask_from_npz is not None:
@@ -96,9 +101,15 @@ class MultiFileNpzDataset(Dataset):
                 anns = []
             mask = _build_category_mask(anns, cube.shape[0], cube.shape[1])
 
+        if class_mask_from_npz is None:
+            # Frame has no annotated anomalies (all-background) — emit zeros so collate
+            # shapes line up; per-class AUROC will simply see no positives here.
+            class_mask_from_npz = np.zeros((cube.shape[0], cube.shape[1]), dtype=np.uint8)
+
         return {
             "cube": cube,
             "mask": mask,
+            "class_mask": class_mask_from_npz,
             "wavelengths": wavelengths,
             "mesu_index": image_id,
         }

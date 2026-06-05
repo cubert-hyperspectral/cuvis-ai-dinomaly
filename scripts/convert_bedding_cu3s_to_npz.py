@@ -154,8 +154,10 @@ def main():
             summary[split]["with_mask"] += int(has_mask)
             rows.append({
                 "npz_path": str(npz),
-                "mask_path": "",          # mask lives inside the NPZ
+                "cu3s_path": "",          # MultiFileNpzDataset uses npz_path only
                 "annotation_json": "",    # COCO JSONs ignored (50/53 empty on this dataset)
+                "image_id": 0,            # one frame per cu3s → constant 0; needed by MultiFileNpzDataset
+                "mask_path": "",          # mask lives inside the NPZ
                 "split": split,
             })
             cls_s = f" classes={classes}" if classes else ""
@@ -163,7 +165,10 @@ def main():
 
     csv_path = args.out_root / args.splits_csv
     with open(csv_path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["npz_path", "mask_path", "annotation_json", "split"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=["npz_path", "cu3s_path", "annotation_json", "image_id", "mask_path", "split"],
+        )
         w.writeheader()
         w.writerows(rows)
 
