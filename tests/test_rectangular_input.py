@@ -19,11 +19,11 @@ import torch.nn as nn
 
 from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector
 
-
 # ---------------------------------------------------------------------------
 # Fake DinomalyModel whose encoder exposes a real Conv2d patch-embed
 # (needed because DinomalyDetector reads kernel_size from it for patch_size)
 # ---------------------------------------------------------------------------
+
 
 class _FakePatchEmbed(nn.Module):
     def __init__(self) -> None:
@@ -74,6 +74,7 @@ def _make_detector(**kw) -> DinomalyDetector:
 # _to_hw: arg parsing
 # ---------------------------------------------------------------------------
 
+
 def test_image_size_int_stored_as_square_tuple() -> None:
     det = _make_detector(image_size=448, crop_size=392)
     assert det.image_size == (448, 448)
@@ -106,6 +107,7 @@ def test_crop_size_bad_input_raises() -> None:
 # Rectangular patch: applied only when h != w
 # ---------------------------------------------------------------------------
 
+
 def test_square_pipeline_does_not_apply_rect_patch() -> None:
     """Square image_size must NOT touch the anomalib model — backward compat."""
     det = _make_detector(image_size=448)
@@ -127,6 +129,7 @@ def test_rect_patch_is_idempotent() -> None:
     from cuvis_ai_dinomaly.node._rectangular_input_patch import (
         patch_dinomaly_model_for_rectangular_input,
     )
+
     det = _make_detector(image_size=(434, 1036))
     # Already patched by constructor; calling again must not raise or re-bind
     original_method = det.dinomaly_model.get_encoder_decoder_outputs
@@ -140,9 +143,11 @@ def test_rect_patch_is_idempotent() -> None:
 # Forward output shapes
 # ---------------------------------------------------------------------------
 
+
 def _ctx_inference():
     from cuvis_ai_schemas.enums import ExecutionStage
     from cuvis_ai_schemas.execution import Context
+
     return Context(stage=ExecutionStage.INFERENCE, epoch=0, batch_idx=0, global_step=0)
 
 

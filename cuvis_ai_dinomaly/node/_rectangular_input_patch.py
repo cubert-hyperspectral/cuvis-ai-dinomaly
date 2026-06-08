@@ -42,16 +42,16 @@ def patch_dinomaly_model_for_rectangular_input(model: Any, patch_size: int = 14)
     if getattr(model, "_rect_patch_applied", False):
         return
 
-    def _process_features_for_spatial_output_rect(self, features, hp: int, wp: int):
+    def _process_features_for_spatial_output_rect(self, features: list, hp: int, wp: int) -> list:
         # Mirror of anomalib's original (lines 388-396) — only the reshape target changes.
         # If remove_class_token is False, the class+register tokens are still on the
         # token axis and must be stripped before the spatial reshape.
         if not self.remove_class_token:
-            features = [f[:, 1 + self.encoder.num_register_tokens:, :] for f in features]
+            features = [f[:, 1 + self.encoder.num_register_tokens :, :] for f in features]
         batch_size = features[0].shape[0]
         return [f.permute(0, 2, 1).reshape([batch_size, -1, hp, wp]).contiguous() for f in features]
 
-    def get_encoder_decoder_outputs_rect(self, x: torch.Tensor):
+    def get_encoder_decoder_outputs_rect(self, x: torch.Tensor) -> tuple[list, list]:
         """Reimplementation of anomalib's get_encoder_decoder_outputs with rectangular
         patch-grid support. Computes (H_p, W_p) from x.shape rather than sqrt(N)."""
         H, W = int(x.shape[2]), int(x.shape[3])
@@ -78,7 +78,7 @@ def patch_dinomaly_model_for_rectangular_input(model: Any, patch_size: int = 14)
 
         if self.remove_class_token:
             encoder_features = [
-                e[:, 1 + self.encoder.num_register_tokens:, :] for e in encoder_features
+                e[:, 1 + self.encoder.num_register_tokens :, :] for e in encoder_features
             ]
 
         x = self._fuse_feature(encoder_features)
@@ -106,4 +106,7 @@ def patch_dinomaly_model_for_rectangular_input(model: Any, patch_size: int = 14)
     # Bind the replacement method to the instance.
     model.get_encoder_decoder_outputs = get_encoder_decoder_outputs_rect.__get__(model, type(model))
     model._rect_patch_applied = True
-    logger.info("DinomalyModel: patched get_encoder_decoder_outputs for rectangular inputs (patch_size={})", patch_size)
+    logger.info(
+        "DinomalyModel: patched get_encoder_decoder_outputs for rectangular inputs (patch_size={})",
+        patch_size,
+    )

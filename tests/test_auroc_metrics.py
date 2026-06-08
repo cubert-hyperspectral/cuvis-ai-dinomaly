@@ -9,7 +9,7 @@ import torch
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 
-from cuvis_ai_dinomaly.node.auroc_metrics import AUROCEpochEndCallback, AnomalyAUROCMetrics
+from cuvis_ai_dinomaly.node.auroc_metrics import AnomalyAUROCMetrics, AUROCEpochEndCallback
 
 
 def _ctx(stage: ExecutionStage = ExecutionStage.VAL, epoch: int = 0, batch_idx: int = 0) -> Context:
@@ -111,7 +111,8 @@ def test_callback_resets_on_epoch_start_between_epochs() -> None:
     """Accumulator must be cleared on each new validation epoch."""
     node = AnomalyAUROCMetrics()
     cb = AUROCEpochEndCallback(auroc_node=node)
-    trainer = MagicMock(); pl_module = MagicMock()
+    trainer = MagicMock()
+    pl_module = MagicMock()
 
     # Epoch 0 — populate.
     s, t, a = _batch(2, 4, 4, score_value=1.0, all_anomaly=True)

@@ -14,8 +14,6 @@ from loguru import logger
 from skimage.draw import polygon2mask
 from torch.utils.data import DataLoader, Dataset
 
-from cuvis_ai_dinomaly.data._coco_utils import _build_category_mask, _parse_coco_json
-
 
 def _parse_coco_json(json_path: Path) -> dict[str, Any]:
     with json_path.open(encoding="utf-8") as f:
