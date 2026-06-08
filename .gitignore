@@ -11,3 +11,5 @@ htmlcov/
 diagnostics/
 outputs/
 presentation_docs/
+pre_trained/
+notebooks/bedding_anomaly/pre_trained/
