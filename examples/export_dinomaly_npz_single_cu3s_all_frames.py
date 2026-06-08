@@ -29,7 +29,7 @@ def two_stage_gate_image_score(score_map: np.ndarray, top_k_fraction: float) -> 
     k = max(1, int(math.ceil(n * top_k_fraction)))
     if k >= n:
         return float(vals.mean())
-    return float(np.partition(vals, n - k)[n - k:].mean())
+    return float(np.partition(vals, n - k)[n - k :].mean())
 
 
 def _to_numpy(x: torch.Tensor | None) -> np.ndarray | None:
@@ -281,7 +281,9 @@ def main() -> None:
                     "binary_decisions": decisions.astype(np.float32)
                     if decisions is not None
                     else np.array([], np.float32),
-                    "gt_mask": mask.astype(np.int32) if mask is not None else np.array([], np.int32),
+                    "gt_mask": mask.astype(np.int32)
+                    if mask is not None
+                    else np.array([], np.int32),
                     "mesu_index": np.array(int(batch["mesu_index"][i].item()), dtype=np.int64),
                     "cu3s_path": np.array(cu3s_str, dtype=str),
                     "image_score_topk": np.array(img_topk, dtype=np.float32),

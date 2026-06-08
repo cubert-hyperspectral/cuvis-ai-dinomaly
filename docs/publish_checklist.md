@@ -1,81 +1,78 @@
-# cuvis-ai-dinomaly plugin publish checklist
+# cuvis-ai-dinomaly publish checklist
 
-This checklist prepares `cuvis-ai-dinomaly` as an official plugin release for:
+Pre-release checklist for any `vX.Y.Z` tag. Run all steps from the repo root.
 
-- Repo: `https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly.git`
-- Initial tag: `v0.1.0`
-
-## 1) Pre-publish validation
-
-From repo root (`/home/dev/anish/cuvis-ai-dinomaly`):
+## 1. Pre-publish validation
 
 ```bash
-uv sync --extra dev
-uv run pytest tests -q
-uv run pytest tests --cov=cuvis_ai_dinomaly --cov-report=term-missing --cov-fail-under=0
-uv run python -c "from cuvis_ai_core.utils.node_registry import NodeRegistry; r=NodeRegistry(); r.load_plugins('examples/plugins.yaml'); print(sorted(r.list_plugins().keys()))"
+# Install all dev deps from public indexes (no local-path overrides)
+uv sync --no-sources --extra dev
+
+# Fast test suite — must be green before tagging
+uv run --no-sources --extra dev pytest tests/ -m "not slow" -v --tb=short
+
+# Manifest smoke test — confirm NodeRegistry can load both nodes
+uv run --no-sources --extra dev python -c "
+from cuvis_ai_core.utils.node_registry import NodeRegistry
+r = NodeRegistry()
+r.load_plugins('examples/plugins.yaml')
+print(sorted(r.list_plugins().keys()))
+"
+# Expected: ['DinomalyDetector', 'DinomalyTrainLossBridge']
 ```
 
-Expected:
+## 2. Confirm release metadata
 
-- test suite passes
-- coverage report is generated
-- plugin loads from local manifest and exposes Dinomaly nodes
-
-## 2) Confirm release metadata
-
-- `pyproject.toml` has:
+- `pyproject.toml`:
+  - `project.version = "X.Y.Z"` matches the intended tag
   - `project.name = "cuvis-ai-dinomaly"`
-  - `project.version = "0.1.0"`
-  - stable public node paths under `cuvis_ai_dinomaly.node.*`
-- `.gitignore` excludes:
-  - `diagnostics/`
-  - `outputs/`
-  - `presentation_docs/`
+  - `project.license = "Apache-2.0"`
+- `CHANGELOG.md`: `## X.Y.Z - YYYY-MM-DD` section exists and is complete (no stale "Unreleased" content)
+- `uv.lock`: generated with `--no-sources` so CI can use `--locked`
 
-## 3) Create GitHub repository and push
+## 3. Run compatibility audit (skill §8)
 
-If remote does not exist yet:
+Check that every plugin runtime dep that also appears in `cuvis-ai-core`'s `uv.lock` satisfies the plugin's specifier. See `docs/compatibility_audit.md` for the procedure and last recorded results. Re-run if any runtime dep version changed since the last audit.
 
-```bash
-git init
-git remote add origin git@github.com:cubert-hyperspectral/cuvis-ai-dinomaly.git
-git add .
-git commit -m "Prepare cuvis-ai-dinomaly v0.1.0 plugin release"
-git branch -M main
-git push -u origin main
-```
-
-If remote already exists, skip `git init` and `remote add`.
-
-## 4) Tag release
+## 4. Build and validate wheel
 
 ```bash
-git tag -a v0.1.0 -m "cuvis-ai-dinomaly v0.1.0"
-git push origin v0.1.0
+uv build --no-sources
+uv run --no-sources --with twine twine check dist/*
 ```
 
-## 5) Validate repo+tag plugin install flow
+Verify the wheel name starts with `cuvis_ai_dinomaly-X.Y.Z-`.
 
-From `cuvis-ai` repo root:
+## 5. Tag the release
 
 ```bash
-uv run python -c "from cuvis_ai_core.utils.node_registry import NodeRegistry; r=NodeRegistry(); r.load_plugins('configs/plugins/dinomaly.yaml'); print(sorted(r.list_plugins().keys()))"
+git tag -a vX.Y.Z -m "cuvis-ai-dinomaly vX.Y.Z"
+git push origin vX.Y.Z
 ```
 
-Expected:
+The `release.yml` workflow fires on the tag push and:
+- Validates tests + lint
+- Runs security scanning
+- Builds the wheel and checks tag == package version
+- Creates a GitHub release with the CHANGELOG section as release notes
 
-- `DinomalyDetector`
-- `DinomalyTrainLossBridge`
+## 6. Validate git-tag manifest install
 
-## 6) cuvis-ai integration files
+After the tag is pushed, confirm the plugin loads from the git-tag manifest (not just local path):
 
-Already prepared in `cuvis-ai`:
+```bash
+# From the cuvis-ai repo (or any clean venv with cuvis-ai-core installed)
+uv run python -c "
+from cuvis_ai_core.utils.node_registry import NodeRegistry
+r = NodeRegistry()
+r.load_plugins('configs/plugins/dinomaly.yaml')  # uses repo + tag
+print(sorted(r.list_plugins().keys()))
+"
+```
 
-- `configs/plugins/dinomaly.yaml` (repo + tag manifest)
-- `configs/plugins/registry.yaml` (added `dinomaly` entry)
+## 7. Update central registry (cuvis-ai repo)
 
-## Notes on local development vs release installs
+After the git-tag manifest install is verified, update or open a PR against `cuvis-ai`:
 
-- `pyproject.toml` keeps local `tool.uv.sources` for internal dev convenience.
-- Tagged GitHub plugin installs rely on standard `project.dependencies`.
+- `configs/plugins/registry.yaml` — bump/add the `dinomaly:` tag entry to `vX.Y.Z`
+- `configs/plugins/dinomaly.yaml` — bump `tag:` to `vX.Y.Z`

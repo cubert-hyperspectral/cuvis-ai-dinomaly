@@ -159,7 +159,7 @@ def _pick_selector_outputs(node_out: dict[str, object]) -> dict:
 
 def _gt_anomaly_bool(mask_hw: np.ndarray) -> np.ndarray:
     """Binary anomaly map: category 0 = normal (matches typical lentils normal_class_ids=[0])."""
-    return (mask_hw.astype(np.int32) != 0)
+    return mask_hw.astype(np.int32) != 0
 
 
 def _binary_prf_iou(pred: np.ndarray, gt: np.ndarray) -> dict[str, float]:
@@ -194,7 +194,9 @@ def main() -> None:
     p.add_argument("--processing-mode", type=str, default="Reflectance")
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--strict-weights", action="store_true")
-    p.add_argument("--limit", type=int, default=0, help="If >0, only process this many test frames.")
+    p.add_argument(
+        "--limit", type=int, default=0, help="If >0, only process this many test frames."
+    )
     args = p.parse_args()
 
     yaml_path = args.pipeline_yaml.resolve()
@@ -235,13 +237,13 @@ def main() -> None:
     )
     pipeline.torch_layers.eval()
 
-    common = dict(
-        splits_csv=str(splits_path),
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-        persistent_workers=False,
-    )
+    common = {
+        "splits_csv": str(splits_path),
+        "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "pin_memory": device.type == "cuda",
+        "persistent_workers": False,
+    }
     if backend == "npz":
         datamodule = MultiFileNpzDataModule(**common)
     else:
@@ -336,7 +338,9 @@ def main() -> None:
                     "binary_decisions": decisions.astype(np.float32)
                     if decisions is not None
                     else np.array([], np.float32),
-                    "gt_mask": mask.astype(np.int32) if mask is not None else np.array([], np.int32),
+                    "gt_mask": mask.astype(np.int32)
+                    if mask is not None
+                    else np.array([], np.int32),
                     "mesu_index": np.array(int(batch["mesu_index"][i].item()), dtype=np.int64),
                     path_key: np.array(frame_path, dtype=str),
                 }
@@ -371,7 +375,9 @@ def main() -> None:
         "splits_csv": str(splits_path),
         "pipeline_yaml": str(yaml_path),
         "pipeline_pt": str(pt_path),
-        "node_metrics_mean_over_frames": {k: float(np.mean(v)) for k, v in sorted(node_metric_accum.items())},
+        "node_metrics_mean_over_frames": {
+            k: float(np.mean(v)) for k, v in sorted(node_metric_accum.items())
+        },
     }
     if per_image_stats:
         keys = ["precision", "recall", "f1_score", "iou"]

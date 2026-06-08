@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate Release Candidate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run tests
+        run: uv run --no-sources --extra dev pytest tests/ -m "not slow" -v --tb=long
+
+      - name: Run lint
+        run: |
+          uv run --no-sources --extra dev ruff format --check cuvis_ai_dinomaly tests examples
+          uv run --no-sources --extra dev ruff check cuvis_ai_dinomaly tests examples
+
+  security:
+    name: Security Scanning
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run pip-audit
+        # Non-blocking: anomalib==2.1.0 / kornia==0.6.12 may carry transient CVEs
+        # we cannot patch without breaking compatibility.
+        run: uv run --no-sources --extra dev pip-audit --desc on --skip-editable || true
+
+      - name: Run detect-secrets
+        run: uv run --no-sources --extra dev detect-secrets scan --baseline .secrets.baseline
+
+      - name: Run bandit
+        run: uv run --no-sources --extra dev bandit -r cuvis_ai_dinomaly/ -c pyproject.toml || true
+
+  build:
+    name: Build And Validate Artifacts
+    needs: [validate, security]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build distributions
+        run: uv build --no-sources
+
+      - name: Validate distributions
+        run: uv run --no-sources --with twine twine check dist/*
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          export TAG_VERSION
+          python - <<'PY'
+          import os, pathlib, re
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          match = re.match(r"^cuvis_ai_dinomaly-([^-]+)-", wheel.name)
+          if match is None:
+              raise SystemExit(f"Could not parse version from wheel: {wheel.name}")
+          pkg_ver = match.group(1)
+          tag_ver = os.environ["TAG_VERSION"]
+          print(f"Package: {pkg_ver}  Tag: {tag_ver}")
+          if pkg_ver != tag_ver:
+              raise SystemExit(f"Tag {tag_ver!r} != package {pkg_ver!r}")
+          PY
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Extract changelog entry
+        id: changelog
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib, re
+          version = os.environ["GITHUB_REF_NAME"][1:]
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = re.compile(
+              rf"^## {re.escape(version)}(?:\s+-.*)?$\n(?P<body>.*?)(?=^## |\Z)",
+              re.MULTILINE | re.DOTALL,
+          )
+          match = pattern.search(changelog)
+          if match is None:
+              raise SystemExit(f"No CHANGELOG.md entry for {version}")
+          pathlib.Path("release_notes.md").write_text(match.group(0).strip() + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"version={version}\n")
+          PY
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.changelog.outputs.version }}
+          body_path: release_notes.md
+          files: dist/*

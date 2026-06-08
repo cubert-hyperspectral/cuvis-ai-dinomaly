@@ -29,10 +29,10 @@ from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
+from cuvis_ai_core.training.config import create_callbacks_from_config
 from cuvis_ai_core.utils.node_registry import NodeRegistry
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import CallbacksConfig, ModelCheckpointConfig, TrainingConfig
-from cuvis_ai_core.training.config import create_callbacks_from_config
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
 
@@ -48,7 +48,9 @@ def _wavelengths_nm_for_band_indices(
     with splits_csv.open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
 
-    train_rows = [r for r in rows if r.get("split") == "train" and (r.get("npz_path") or "").strip()]
+    train_rows = [
+        r for r in rows if r.get("split") == "train" and (r.get("npz_path") or "").strip()
+    ]
     if not train_rows:
         train_rows = [r for r in rows if (r.get("npz_path") or "").strip()]
     if not train_rows:
@@ -119,14 +121,16 @@ def main(cfg: DictConfig) -> None:
         if "npz_path" in header:
             backend = "npz"
 
-    common_loader_kwargs = dict(
-        splits_csv=cfg.data.splits_csv,
-        batch_size=cfg.data.batch_size,
-        num_workers=int(cfg.data.get("num_workers", 0)),
-        pin_memory=bool(cfg.data.get("pin_memory", True)),
-        persistent_workers=bool(cfg.data.get("persistent_workers", True)),
-        worker_multiprocessing_context=str(cfg.data.get("worker_multiprocessing_context", "spawn")),
-    )
+    common_loader_kwargs = {
+        "splits_csv": cfg.data.splits_csv,
+        "batch_size": cfg.data.batch_size,
+        "num_workers": int(cfg.data.get("num_workers", 0)),
+        "pin_memory": bool(cfg.data.get("pin_memory", True)),
+        "persistent_workers": bool(cfg.data.get("persistent_workers", True)),
+        "worker_multiprocessing_context": str(
+            cfg.data.get("worker_multiprocessing_context", "spawn")
+        ),
+    }
 
     if backend == "npz":
         datamodule = MultiFileNpzDataModule(**common_loader_kwargs)

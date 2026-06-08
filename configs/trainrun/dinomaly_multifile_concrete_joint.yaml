@@ -14,7 +14,7 @@ eval_mode: best
 minmax_init_frames: 20
 
 data:
-  splits_csv: /home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_full.csv
+  splits_csv: /path/to/your/splits.csv  # set to your actual splits CSV path
   batch_size: 1
   processing_mode: Reflectance
   num_workers: 6
