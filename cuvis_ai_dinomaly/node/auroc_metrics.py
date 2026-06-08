@@ -154,7 +154,9 @@ class AUROCEpochEndCallback(Callback):
     :class:`AnomalyAUROCMetrics` wired into the pipeline graph.
     """
 
-    def __init__(self, auroc_node: AnomalyAUROCMetrics, node_log_prefix: str = "metrics_auroc") -> None:
+    def __init__(
+        self, auroc_node: AnomalyAUROCMetrics, node_log_prefix: str = "metrics_auroc"
+    ) -> None:
         super().__init__()
         self._node = auroc_node
         self._prefix = node_log_prefix

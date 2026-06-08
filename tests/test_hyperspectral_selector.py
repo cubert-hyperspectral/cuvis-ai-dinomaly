@@ -50,15 +50,17 @@ def test_3_channel_target_backward_compat_with_rgb(bedding_cube) -> None:
     out = sel.forward(cube=cube, wavelengths=wavelengths)
     img = out["rgb_image"]
     assert img.shape == (1, 8, 8, 3)
-    assert torch.all(img[..., 0] == 3.0)   # 625 nm → band 2
-    assert torch.all(img[..., 1] == 2.0)   # 550 nm → band 1
-    assert torch.all(img[..., 2] == 1.0)   # 450 nm → band 0
+    assert torch.all(img[..., 0] == 3.0)  # 625 nm → band 2
+    assert torch.all(img[..., 1] == 2.0)  # 550 nm → band 1
+    assert torch.all(img[..., 2] == 1.0)  # 450 nm → band 0
 
 
 def test_nearest_match_for_off_grid_wavelengths(bedding_cube) -> None:
     """Targets that don't exactly match an input wavelength snap to the nearest band."""
     cube, wavelengths = bedding_cube
-    sel = FixedHyperspectralSelector(target_wavelengths=(640.0, 1490.0))  # → 625 (band 2), 1450 (band 5)
+    sel = FixedHyperspectralSelector(
+        target_wavelengths=(640.0, 1490.0)
+    )  # → 625 (band 2), 1450 (band 5)
     out = sel.forward(cube=cube, wavelengths=wavelengths)
     img = out["rgb_image"]
     assert img.shape == (1, 8, 8, 2)
@@ -69,9 +71,7 @@ def test_nearest_match_for_off_grid_wavelengths(bedding_cube) -> None:
 def test_normalize_output_divides_by_max(bedding_cube) -> None:
     """With normalize_output=True, the global max becomes 1.0."""
     cube, wavelengths = bedding_cube
-    sel = FixedHyperspectralSelector(
-        target_wavelengths=(625.0, 1450.0), normalize_output=True
-    )
+    sel = FixedHyperspectralSelector(target_wavelengths=(625.0, 1450.0), normalize_output=True)
     out = sel.forward(cube=cube, wavelengths=wavelengths)
     img = out["rgb_image"]
     # max value pre-norm is 6 (the 1450 nm band), so after /6 the 1450 channel is 1.0

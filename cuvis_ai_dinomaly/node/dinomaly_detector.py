@@ -51,7 +51,7 @@ class DinomalyDetector(Node):
             dtype=torch.float32,
             shape=(-1, -1, -1, -1),
             description="Channel-stacked image [B, H, W, C] in float32 (0–1 or 0–255). "
-                        "C must equal the detector's input_channels (default 3).",
+            "C must equal the detector's input_channels (default 3).",
         ),
     }
 
@@ -101,6 +101,7 @@ class DinomalyDetector(Node):
         self.fuse_layer_encoder = fuse_layer_encoder
         self.fuse_layer_decoder = fuse_layer_decoder
         self.remove_class_token = bool(remove_class_token)
+
         # Accept int (square) or (h, w) tuple/list (aspect-preserving). Internally
         # store as (h, w) tuple so downstream code is shape-agnostic. A bare int
         # behaves exactly as before (backward compatible with all saved pipelines).
@@ -110,6 +111,7 @@ class DinomalyDetector(Node):
             if isinstance(x, (tuple, list)) and len(x) == 2:
                 return (int(x[0]), int(x[1]))
             raise ValueError(f"{name} must be int or (h, w) tuple/list, got {x!r}")
+
         self.image_size = _to_hw(image_size, "image_size")
         self.crop_size = _to_hw(crop_size, "crop_size")
         self.use_center_crop = bool(use_center_crop)
@@ -162,6 +164,7 @@ class DinomalyDetector(Node):
             from cuvis_ai_dinomaly.node._rectangular_input_patch import (
                 patch_dinomaly_model_for_rectangular_input,
             )
+
             # Infer patch_size from the encoder's patch_embed.proj (kernel = stride = patch)
             patch_size = int(model.encoder.patch_embed.proj.kernel_size[0])
             patch_dinomaly_model_for_rectangular_input(model, patch_size=patch_size)
@@ -171,6 +174,7 @@ class DinomalyDetector(Node):
             from cuvis_ai_dinomaly.node._patch_embed_inflation import (
                 inflate_conv2d_input_channels,
             )
+
             old_proj = model.encoder.patch_embed.proj
             new_proj = inflate_conv2d_input_channels(old_proj, self.input_channels)
             model.encoder.patch_embed.proj = new_proj
@@ -179,7 +183,8 @@ class DinomalyDetector(Node):
                 model.encoder.patch_embed.in_chans = self.input_channels
             logger.info(
                 "DinomalyDetector: inflated patch-embed Conv2d from {} → {} input channels",
-                old_proj.in_channels, self.input_channels,
+                old_proj.in_channels,
+                self.input_channels,
             )
         self._freeze_encoder_unfreeze_head()
 

@@ -73,9 +73,9 @@ class FixedHyperspectralSelector(Node):
             dtype=torch.float32,
             shape=(-1, -1, -1, -1),
             description="Stacked selected bands [B, H, W, len(target_wavelengths)]. "
-                        "Port name kept as 'rgb_image' for pipeline-graph compatibility "
-                        "with DinomalyDetector and other downstream consumers — the "
-                        "channel count depends on the target_wavelengths configured.",
+            "Port name kept as 'rgb_image' for pipeline-graph compatibility "
+            "with DinomalyDetector and other downstream consumers — the "
+            "channel count depends on the target_wavelengths configured.",
         ),
         "band_info": PortSpec(
             dtype=dict,
