@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import torch
@@ -92,8 +93,35 @@ class DinomalyDetector(Node):
         crop_size: int | tuple[int, int] | list[int] = 392,
         use_center_crop: bool = True,
         input_channels: int = 3,
+        fast_inference: bool = False,
+        use_tf32: bool | None = None,
+        autocast_dtype: str | torch.dtype | None = None,
+        compile_mode: str | None = None,
         **kwargs: Any,
     ) -> None:
+        """See class docstring for the parameter explanations.
+
+        Fast-inference parameters (all default to off → bit-exact backward compatibility):
+
+        - ``fast_inference``: convenience flag that resolves to the validated recipe
+          (``use_tf32=True``, ``autocast_dtype=torch.bfloat16``, ``compile_mode='reduce-overhead'``).
+          Measured lossless speedup 3.6×–8.4× depending on resolution (see
+          ``docs/proposals/fast_inference_kwargs.md`` for the empirical basis).
+        - ``use_tf32``: enable TF32 matmul precision (``torch.set_float32_matmul_precision('high')``).
+          PROCESS-WIDE side effect — affects all torch matmuls in the process, not just
+          this detector.
+        - ``autocast_dtype``: wrap the model forward in ``torch.autocast(..., dtype=...)``.
+          ``torch.bfloat16`` requires Ampere or newer (sm_80+); we check at construction.
+          May be passed as a string (``"bfloat16"`` / ``"float16"``) for YAML serialisation.
+        - ``compile_mode``: apply ``torch.compile(model, mode=...)`` lazily on the first
+          INFERENCE/VALIDATION forward. NEVER applied during training (would break gradient
+          flow under our existing freeze/unfreeze pattern). Use ``warmup()`` to pay the
+          10-30s compile cost up front instead of on the first real batch.
+
+        All four parameters default to off. The convenience flag honours explicit
+        power-user overrides (e.g. ``fast_inference=True, autocast_dtype='float16'``
+        keeps fp16 instead of bf16).
+        """
         self.encoder_name = encoder_name
         self.bottleneck_dropout = float(bottleneck_dropout)
         self.decoder_depth = int(decoder_depth)
@@ -101,6 +129,66 @@ class DinomalyDetector(Node):
         self.fuse_layer_encoder = fuse_layer_encoder
         self.fuse_layer_decoder = fuse_layer_decoder
         self.remove_class_token = bool(remove_class_token)
+
+        # ------------------------------------------------------------------
+        # Fast-inference resolution — see docs/proposals/fast_inference_kwargs.md
+        # for the empirical basis (lossless 3.6×–8.4× speedup across pilots).
+        # All defaults preserve byte-identical behaviour with prior versions.
+        # ------------------------------------------------------------------
+        def _resolve_autocast_dtype(v: str | torch.dtype | None) -> torch.dtype | None:
+            if v is None:
+                return None
+            if isinstance(v, torch.dtype):
+                return v
+            # Accept string for YAML-serialised pipelines.
+            mapping = {
+                "bfloat16": torch.bfloat16,
+                "bf16": torch.bfloat16,
+                "float16": torch.float16,
+                "fp16": torch.float16,
+                "float32": torch.float32,
+                "fp32": torch.float32,
+            }
+            if v not in mapping:
+                raise ValueError(
+                    f"DinomalyDetector: autocast_dtype must be None, a torch.dtype, "
+                    f"or one of {list(mapping)}, got {v!r}"
+                )
+            return mapping[v]
+
+        autocast_resolved = _resolve_autocast_dtype(autocast_dtype)
+        if fast_inference:
+            # Umbrella flag fills in the recipe; explicit per-knob args still win.
+            self._use_tf32 = True if use_tf32 is None else bool(use_tf32)
+            self._autocast_dtype = (
+                torch.bfloat16 if autocast_resolved is None else autocast_resolved
+            )
+            self._compile_mode = (
+                "reduce-overhead" if compile_mode is None else str(compile_mode)
+            )
+        else:
+            self._use_tf32 = bool(use_tf32) if use_tf32 is not None else False
+            self._autocast_dtype = autocast_resolved
+            self._compile_mode = str(compile_mode) if compile_mode is not None else None
+        self._compiled = False  # lazy: compile happens on first INFERENCE/VAL forward
+        self._compile_shape: tuple[int, int] | None = None  # for shape-change warning
+
+        # Guard: bf16 autocast requires Ampere or newer. Fail loudly at construction
+        # rather than at the first forward.
+        if self._autocast_dtype is torch.bfloat16 and torch.cuda.is_available():
+            if not torch.cuda.is_bf16_supported():
+                raise RuntimeError(
+                    "DinomalyDetector: autocast_dtype=torch.bfloat16 (or fast_inference=True) "
+                    "requires an Ampere or newer GPU (sm_80+). Detected GPU does not support "
+                    "bf16. Pass `autocast_dtype='float16'` or `autocast_dtype=None` instead."
+                )
+
+        # Apply TF32 immediately (idempotent — global state, no-op if already 'high').
+        if self._use_tf32:
+            torch.set_float32_matmul_precision("high")
+            logger.info(
+                "DinomalyDetector: TF32 matmul precision enabled (process-wide setting)"
+            )
 
         # Accept int (square) or (h, w) tuple/list (aspect-preserving). Internally
         # store as (h, w) tuple so downstream code is shape-agnostic. A bare int
@@ -141,6 +229,16 @@ class DinomalyDetector(Node):
             crop_size=crop_size,
             use_center_crop=use_center_crop,
             input_channels=input_channels,
+            fast_inference=fast_inference,
+            use_tf32=use_tf32,
+            # Re-serialise dtype as the user passed it — for YAML round-trip,
+            # canonicalise torch.dtype to its short string form.
+            autocast_dtype=(
+                autocast_dtype
+                if not isinstance(autocast_dtype, torch.dtype)
+                else str(autocast_dtype).removeprefix("torch.")
+            ),
+            compile_mode=compile_mode,
             **kwargs,
         )
 
@@ -215,6 +313,43 @@ class DinomalyDetector(Node):
             for p in model.encoder.patch_embed.proj.parameters():
                 p.requires_grad_(True)
 
+    def warmup(self, sample_input: Tensor | None = None) -> None:
+        """Pre-compile the model so the first real inference doesn't pay torch.compile cost.
+
+        - No-op if ``compile_mode is None`` or compile has already happened.
+        - When ``sample_input`` is None, fabricates a zero ``[1, H, W, input_channels]``
+          tensor on the model's current device, matching ``self.image_size`` and
+          ``self.input_channels``. Caller can pass a representative tensor explicitly
+          if they want to avoid the warmup landing on shape ``self.image_size``
+          and triggering a later recompile on the real inference batch shape.
+
+        Use after pipeline load + before the first real batch:
+
+            detector.warmup()                # synthetic input, takes ~10-30s
+            # … real inference proceeds at the compiled-fast latency
+        """
+        if not self._compile_mode or self._compiled:
+            return
+        if sample_input is None:
+            h, w = self.image_size  # always (h, w) after _to_hw in __init__
+            device = next(self.dinomaly_model.parameters()).device
+            dtype = next(self.dinomaly_model.parameters()).dtype
+            # Build a [B=1, H, W, C] input in the same layout the forward expects.
+            sample_input = torch.zeros(
+                1, h, w, self.input_channels, device=device, dtype=dtype
+            )
+        # Use a synthetic INFERENCE context so the compile guard above fires.
+        ctx = Context(stage=ExecutionStage.INFERENCE, epoch=0, batch_idx=0, global_step=0)
+        with torch.inference_mode():
+            self.forward(sample_input, context=ctx)
+        logger.info(
+            "DinomalyDetector: warmup complete — torch.compile cost paid up front "
+            "(compile_mode={}, shape={}×{})",
+            self._compile_mode,
+            sample_input.shape[1],
+            sample_input.shape[2],
+        )
+
     def unfreeze(self) -> None:
         """Train bottleneck + decoder only; encoder stays frozen."""
         self._frozen = False
@@ -269,12 +404,54 @@ class DinomalyDetector(Node):
 
         if need_train_loss:
             model.train()
+            # Training path: NEVER apply autocast or torch.compile here. Both would
+            # interact poorly with the existing freeze/unfreeze pattern and break
+            # gradient flow. The fast_inference flag is documented as inference-only.
             tl = model(x, global_step=gs)
             out["training_loss"] = tl if tl.dim() == 0 else tl.reshape(())
 
+        # Lazy torch.compile — gated on opt-in + non-training stage + once-only.
+        # Done AFTER the training-loss branch so train forwards remain uncompiled.
+        if (
+            self._compile_mode
+            and not self._compiled
+            and stage in (ExecutionStage.INFERENCE, ExecutionStage.VAL, ExecutionStage.TEST)
+        ):
+            self.dinomaly_model = torch.compile(
+                self.dinomaly_model, mode=self._compile_mode
+            )
+            model = self.dinomaly_model  # rebind local for the eval call below
+            self._compiled = True
+            self._compile_shape = (x.shape[-2], x.shape[-1])
+            logger.info(
+                "DinomalyDetector: torch.compile applied (mode={}, first-forward shape={}×{})",
+                self._compile_mode,
+                x.shape[-2],
+                x.shape[-1],
+            )
+        elif (
+            self._compiled
+            and self._compile_shape is not None
+            and (x.shape[-2], x.shape[-1]) != self._compile_shape
+        ):
+            logger.warning(
+                "DinomalyDetector: input shape changed from {}×{} (compile cache) to {}×{} — "
+                "torch.compile will recompile, expect a one-time latency spike.",
+                self._compile_shape[0],
+                self._compile_shape[1],
+                x.shape[-2],
+                x.shape[-1],
+            )
+            self._compile_shape = (x.shape[-2], x.shape[-1])
+
         # Scores: eval forward (matches Anomalib validation inference path).
         # Always no_grad here: loss backprops only through training_loss branch.
-        with torch.no_grad():
+        autocast_ctx = (
+            torch.autocast(device_type=x.device.type, dtype=self._autocast_dtype)
+            if self._autocast_dtype is not None
+            else contextlib.nullcontext()
+        )
+        with torch.no_grad(), autocast_ctx:
             model.eval()
             pred = model(x)
 
