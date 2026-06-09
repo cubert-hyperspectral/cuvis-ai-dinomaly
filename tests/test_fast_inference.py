@@ -17,9 +17,6 @@ Covers:
 
 from __future__ import annotations
 
-import io
-import logging
-from contextlib import redirect_stderr
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -29,7 +26,6 @@ import torch.nn as nn
 from loguru import logger
 
 from cuvis_ai_dinomaly.node.dinomaly_detector import DinomalyDetector
-
 
 # ---------------------------------------------------------------------------
 # Fake DinomalyModel mirroring tests/test_rectangular_input.py
@@ -184,18 +180,14 @@ def test_autocast_dtype_torch_dtype_passthrough() -> None:
 
 def test_tf32_set_when_use_tf32_true() -> None:
     """use_tf32=True must call torch.set_float32_matmul_precision('high') at construction."""
-    with patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.set_float32_matmul_precision"
-    ) as m:
+    with patch("cuvis_ai_dinomaly.node.dinomaly_detector.torch.set_float32_matmul_precision") as m:
         _make_detector(image_size=448, crop_size=392, use_tf32=True)
         m.assert_called_once_with("high")
 
 
 def test_tf32_not_set_by_default() -> None:
     """Default constructor must NOT mutate process-wide TF32 state."""
-    with patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.set_float32_matmul_precision"
-    ) as m:
+    with patch("cuvis_ai_dinomaly.node.dinomaly_detector.torch.set_float32_matmul_precision") as m:
         _make_detector(image_size=448, crop_size=392)
         m.assert_not_called()
 
@@ -208,9 +200,7 @@ def test_tf32_not_set_by_default() -> None:
 def test_compile_does_not_fire_during_train() -> None:
     """fast_inference=True + TRAIN stage must NOT invoke torch.compile."""
     det = _make_detector(image_size=448, crop_size=392, fast_inference=True)
-    with patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.compile"
-    ) as m:
+    with patch("cuvis_ai_dinomaly.node.dinomaly_detector.torch.compile") as m:
         x = torch.rand(1, 28, 28, 3)
         det(x, context=_ctx("TRAIN"))
         m.assert_not_called()
@@ -249,9 +239,7 @@ def test_no_compile_when_compile_mode_none() -> None:
     det = _make_detector(
         image_size=448, crop_size=392, autocast_dtype="bfloat16", compile_mode=None
     )
-    with patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.compile"
-    ) as m:
+    with patch("cuvis_ai_dinomaly.node.dinomaly_detector.torch.compile") as m:
         det(torch.rand(1, 28, 28, 3), context=_ctx("INFERENCE"))
         m.assert_not_called()
 
@@ -281,9 +269,7 @@ def test_shape_change_after_compile_warns() -> None:
         assert recorded is not None
         det._compile_shape = (recorded[0] + 14, recorded[1] + 14)
         warnings: list[str] = []
-        sink_id = logger.add(
-            lambda m: warnings.append(m.record["message"]), level="WARNING"
-        )
+        sink_id = logger.add(lambda m: warnings.append(m.record["message"]), level="WARNING")
         try:
             det(torch.rand(1, 28, 28, 3), context=_ctx("INFERENCE"))
         finally:
@@ -350,12 +336,15 @@ def test_warmup_explicit_sample_input_used() -> None:
 
 def test_bf16_unsupported_raises() -> None:
     """On a CUDA system without bf16 support, fast_inference=True must raise loudly."""
-    with patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_available",
-        return_value=True,
-    ), patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_bf16_supported",
-        return_value=False,
+    with (
+        patch(
+            "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_available",
+            return_value=True,
+        ),
+        patch(
+            "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_bf16_supported",
+            return_value=False,
+        ),
     ):
         with pytest.raises(RuntimeError, match="bfloat16"):
             _make_detector(image_size=448, crop_size=392, fast_inference=True)
@@ -363,12 +352,15 @@ def test_bf16_unsupported_raises() -> None:
 
 def test_fp16_does_not_trigger_bf16_guard() -> None:
     """autocast_dtype='float16' must NOT trigger the bf16 hw check."""
-    with patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_available",
-        return_value=True,
-    ), patch(
-        "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_bf16_supported",
-        return_value=False,
+    with (
+        patch(
+            "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_available",
+            return_value=True,
+        ),
+        patch(
+            "cuvis_ai_dinomaly.node.dinomaly_detector.torch.cuda.is_bf16_supported",
+            return_value=False,
+        ),
     ):
         # Must not raise.
         det = _make_detector(image_size=448, crop_size=392, autocast_dtype="float16")

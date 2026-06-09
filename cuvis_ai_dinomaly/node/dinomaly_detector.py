@@ -163,9 +163,7 @@ class DinomalyDetector(Node):
             self._autocast_dtype = (
                 torch.bfloat16 if autocast_resolved is None else autocast_resolved
             )
-            self._compile_mode = (
-                "reduce-overhead" if compile_mode is None else str(compile_mode)
-            )
+            self._compile_mode = "reduce-overhead" if compile_mode is None else str(compile_mode)
         else:
             self._use_tf32 = bool(use_tf32) if use_tf32 is not None else False
             self._autocast_dtype = autocast_resolved
@@ -186,9 +184,7 @@ class DinomalyDetector(Node):
         # Apply TF32 immediately (idempotent — global state, no-op if already 'high').
         if self._use_tf32:
             torch.set_float32_matmul_precision("high")
-            logger.info(
-                "DinomalyDetector: TF32 matmul precision enabled (process-wide setting)"
-            )
+            logger.info("DinomalyDetector: TF32 matmul precision enabled (process-wide setting)")
 
         # Accept int (square) or (h, w) tuple/list (aspect-preserving). Internally
         # store as (h, w) tuple so downstream code is shape-agnostic. A bare int
@@ -335,9 +331,7 @@ class DinomalyDetector(Node):
             device = next(self.dinomaly_model.parameters()).device
             dtype = next(self.dinomaly_model.parameters()).dtype
             # Build a [B=1, H, W, C] input in the same layout the forward expects.
-            sample_input = torch.zeros(
-                1, h, w, self.input_channels, device=device, dtype=dtype
-            )
+            sample_input = torch.zeros(1, h, w, self.input_channels, device=device, dtype=dtype)
         # Use a synthetic INFERENCE context so the compile guard above fires.
         ctx = Context(stage=ExecutionStage.INFERENCE, epoch=0, batch_idx=0, global_step=0)
         with torch.inference_mode():
@@ -417,9 +411,7 @@ class DinomalyDetector(Node):
             and not self._compiled
             and stage in (ExecutionStage.INFERENCE, ExecutionStage.VAL, ExecutionStage.TEST)
         ):
-            self.dinomaly_model = torch.compile(
-                self.dinomaly_model, mode=self._compile_mode
-            )
+            self.dinomaly_model = torch.compile(self.dinomaly_model, mode=self._compile_mode)
             model = self.dinomaly_model  # rebind local for the eval call below
             self._compiled = True
             self._compile_shape = (x.shape[-2], x.shape[-1])
