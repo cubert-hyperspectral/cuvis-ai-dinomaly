@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## 0.1.5 - 2026-06-10
+
+- Require `cuvis-ai-core>=0.7.1` and `cuvis-ai-schemas>=0.5.2` (inherits the upstream security floors transitively).
+- Updated `examples/plugins.yaml` `provides` entries to the `CatalogNodeEntry` `class_name:` form required by cuvis-ai-schemas 0.5.2.
+- Added the `cuvis_ai_compat.yml` dependency-compatibility workflow (audits the plugin's deps against the cuvis-ai-core lock).
+- Removed the PyPI/TestPyPI release workflow; the plugin is distributed via git tags referenced from cuvis-ai plugin manifests.
+- Stripped `torch` / `torchvision` wheel hashes from `uv.lock`.
+
 ## 0.1.4 - 2026-05-11
 
 - Switched runtime dep from `opencv-python>=4.8.0` to `opencv-python-headless>=4.13.0.92` to match `cuvis-ai-sam3` / `cuvis-ai-adaclip`. The plugin has no `cv2.imshow` / window calls so the GUI subdeps (`libGL`, `libGTK`) were dead weight.
