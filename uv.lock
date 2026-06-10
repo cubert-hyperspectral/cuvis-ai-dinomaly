@@ -527,7 +527,7 @@ dev = [
 requires-dist = [
     { name = "anomalib", specifier = "==2.1.0" },
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=1.7.5" },
-    { name = "cuvis-ai-core", specifier = ">=0.7.0" },
+    { name = "cuvis-ai-core", specifier = ">=0.7.1" },
     { name = "cuvis-ai-schemas", specifier = ">=0.5.2" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.4.0" },
