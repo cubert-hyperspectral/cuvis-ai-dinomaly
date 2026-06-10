@@ -452,13 +452,15 @@ wheels = [
 
 [[package]]
 name = "cuvis-ai-core"
-version = "0.5.2"
+version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "click" },
     { name = "cuvis" },
     { name = "cuvis-ai-schemas", extra = ["proto"] },
     { name = "dataclass-wizard" },
     { name = "dotenv" },
+    { name = "filelock" },
     { name = "gitpython" },
     { name = "graphviz" },
     { name = "grpcio" },
@@ -468,6 +470,7 @@ dependencies = [
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "opencv-python-headless" },
+    { name = "packaging" },
     { name = "pillow" },
     { name = "protobuf" },
     { name = "pycocotools" },
@@ -477,13 +480,14 @@ dependencies = [
     { name = "ruff" },
     { name = "scikit-image" },
     { name = "scikit-learn" },
+    { name = "tomli-w" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/d0/f5134adfb37ca3cd59e249693be4f5a0822c8c4352c08af4dbcd9e6bebfd/cuvis_ai_core-0.5.2.tar.gz", hash = "sha256:8386f42548fa22e6278aa1dea445f529cf9db6f6e25cc77aae3085de3f84fd01", size = 557282, upload-time = "2026-05-05T13:53:52.266Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/63/a1f557caf77c6c2ca40a5cfa88d6976b5cf3bbc52ed344b85a67deee1e47/cuvis_ai_core-0.7.0.tar.gz", hash = "sha256:2591e64e29ddc846528352178bf9ee3a23916353fb76561815e534a4f3c613f8", size = 647852, upload-time = "2026-06-10T10:16:24.347Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/ec/49d298d8aba459a6e904884259843ac4acde2ac47fe11539c9fa242deeeb/cuvis_ai_core-0.5.2-py3-none-any.whl", hash = "sha256:3fc26f85d554049230df8b455589458e2a9104e02fcbca2fa64735d3bf6b207b", size = 147897, upload-time = "2026-05-05T13:53:50.292Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/3b/a52f0451f99492e5a09032c58daa06b57ef2703651d90746ad60817bdb76/cuvis_ai_core-0.7.0-py3-none-any.whl", hash = "sha256:0648c1b0ce46d9b1cf47384069a4787e4786d5df03fbf35f2f98d05b2569f55f", size = 198112, upload-time = "2026-06-10T10:16:22.97Z" },
 ]
 
 [[package]]
@@ -518,8 +522,8 @@ dev = [
 requires-dist = [
     { name = "anomalib", specifier = "==2.1.0" },
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=1.7.5" },
-    { name = "cuvis-ai-core", specifier = ">=0.1.0" },
-    { name = "cuvis-ai-schemas", specifier = ">=0.4.0" },
+    { name = "cuvis-ai-core", specifier = ">=0.7.0" },
+    { name = "cuvis-ai-schemas", specifier = ">=0.5.2" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "kornia", specifier = "==0.6.12" },
@@ -539,15 +543,15 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "cuvis-ai-schemas"
-version = "0.4.1"
+version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/20/51/bbc81b2bb4f347b5bb6047fa10ceacdef6f53d9e903a82c7c52ea2fdfaaf/cuvis_ai_schemas-0.4.1.tar.gz", hash = "sha256:1f5972c32161821538469bf17cf096b027a9310e860b3a93d09a128176b7b9af", size = 209111, upload-time = "2026-05-04T10:23:15.117Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/0d/81dca8bf6b1bdd799c7cc9f6befd08ac2e96cca60fc4712adb92268b5655/cuvis_ai_schemas-0.5.2.tar.gz", hash = "sha256:c91644fd47a985d174d3c976011f9d5e0e1459a5256f5fedbb623f4ca702ad72", size = 225214, upload-time = "2026-06-10T12:35:18.748Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/bc/336223acbf49c214239901186af146549cb4c62d83dc8bc98c46d8c53201/cuvis_ai_schemas-0.4.1-py3-none-any.whl", hash = "sha256:6485759fd5fef2cfc9dfae43de750125d2f2ccbcbf73a970e45ba21683a18281", size = 60162, upload-time = "2026-05-04T10:23:13.706Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/bc/9279502356303ef18adc701e1c33eec8fc566ae8b25bcbd499807b3b7661/cuvis_ai_schemas-0.5.2-py3-none-any.whl", hash = "sha256:66edde377adaf6c5a35468075f9829b53cdfcaec7cc468829a4b56660e4e6eca", size = 66088, upload-time = "2026-06-10T12:35:17.342Z" },
 ]
 
 [package.optional-dependencies]

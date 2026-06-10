@@ -41,8 +41,8 @@ dependencies = [
     # eagerly imports the proprietary Cuvis SDK (cuvis_il sys.exit / native libs)
     # at module load. Plugins should target cuvis-ai-core + cuvis-ai-schemas
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
-    "cuvis-ai-core>=0.1.0",
-    "cuvis-ai-schemas>=0.4.0",
+    "cuvis-ai-core>=0.7.0",
+    "cuvis-ai-schemas>=0.5.2",
     "anomalib==2.1.0",
     "kornia==0.6.12",
     "numpy>=1.20.0",
