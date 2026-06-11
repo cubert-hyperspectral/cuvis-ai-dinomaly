@@ -19,12 +19,11 @@ HuggingFace readiness
 
 ``load_bedding_cu3s_path`` is the *one* function the notebooks should use to
 resolve a frame stem to an on-disk cu3s path. It currently returns a local
-path under ``/mnt/data/bedding_dataset/exported/val/``. When the bedding
-dataset is uploaded to HuggingFace as ``cubert-hyperspectral/bedding-6ch`` in
-cu3s format, swapping to a remote loader is a 1-line change inside this
-function — the notebooks never need to know.
-
-See ``HF_UPLOAD_TODO.md`` for the expected HF repo structure.
+path under ``/mnt/data/bedding_dataset/exported/val/``. The bedding dataset
+has been published to HuggingFace at
+``cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding`` — swapping
+to the remote loader is a 1-line change inside this function (uncomment the
+``hf_hub_download`` branch); the notebooks never need to know.
 """
 
 from __future__ import annotations
@@ -83,10 +82,10 @@ DEFAULT_CU3S_VAL_ROOT = Path("/mnt/data/bedding_dataset/exported/val")
 DEFAULT_MASK_ROOT = Path("/mnt/data/bedding_dataset/labels_extracted/labels")
 
 #: HuggingFace repo id used by the planned bedding-6ch dataset upload. Notebooks
-#: do not depend on this today — it's only referenced when ``BEDDING_HF_FALLBACK``
-#: is set in the environment so users can experiment with HF loading once the
-#: upload happens. See ``HF_UPLOAD_TODO.md``.
-BEDDING_HF_REPO_ID = "cubert-hyperspectral/bedding-6ch"
+#: Referenced when ``BEDDING_HF_FALLBACK`` is set so users can experiment with
+#: HF loading. The dataset is published at
+#: https://huggingface.co/datasets/cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding
+BEDDING_HF_REPO_ID = "cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding"
 BEDDING_HF_CACHE = Path.home() / ".cache" / "cuvis_bedding"
 
 
@@ -144,9 +143,9 @@ def load_bedding_cu3s_path(frame_stem: str, *, val_root: Path = DEFAULT_CU3S_VAL
         # Until then, raise a clear error so notebook authors know the loader
         # is intentionally local-only for now.
         raise NotImplementedError(
-            f"HF loading is wired but the dataset isn't uploaded yet. "
-            f"Once {BEDDING_HF_REPO_ID} exists, this branch will hf_hub_download "
-            f"exported/val/{frame_stem}.cu3s into {BEDDING_HF_CACHE}/."
+            f"HF loading is wired but disabled by default. Uncomment the "
+            f"hf_hub_download branch above to fetch data/val/{frame_stem}.cu3s "
+            f"from {BEDDING_HF_REPO_ID} into {BEDDING_HF_CACHE}/."
         )
     return val_root / f"{frame_stem}.cu3s"
 

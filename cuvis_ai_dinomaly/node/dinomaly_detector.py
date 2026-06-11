@@ -105,8 +105,9 @@ class DinomalyDetector(Node):
 
         - ``fast_inference``: convenience flag that resolves to the validated recipe
           (``use_tf32=True``, ``autocast_dtype=torch.bfloat16``, ``compile_mode='reduce-overhead'``).
-          Measured lossless speedup 3.6×–8.4× depending on resolution (see
-          ``docs/proposals/fast_inference_kwargs.md`` for the empirical basis).
+          Measured lossless speedup 3.6×–8.4× depending on resolution; full benchmark
+          recipe in ``examples/bedding_dinomaly/benchmark_inference_speedups.py``
+          and ``verify_fast_inference_metrics.py`` of the cuvis-ai-cookbook.
         - ``use_tf32``: enable TF32 matmul precision (``torch.set_float32_matmul_precision('high')``).
           PROCESS-WIDE side effect — affects all torch matmuls in the process, not just
           this detector.
@@ -131,9 +132,10 @@ class DinomalyDetector(Node):
         self.remove_class_token = bool(remove_class_token)
 
         # ------------------------------------------------------------------
-        # Fast-inference resolution — see docs/proposals/fast_inference_kwargs.md
-        # for the empirical basis (lossless 3.6×–8.4× speedup across pilots).
-        # All defaults preserve byte-identical behaviour with prior versions.
+        # Fast-inference resolution — lossless 3.6×–8.4× speedup across pilots
+        # validated by examples/bedding_dinomaly/{benchmark_inference_speedups,
+        # verify_fast_inference_metrics}.py in cuvis-ai-cookbook. All defaults
+        # preserve byte-identical behaviour with prior versions.
         # ------------------------------------------------------------------
         def _resolve_autocast_dtype(v: str | torch.dtype | None) -> torch.dtype | None:
             if v is None:
