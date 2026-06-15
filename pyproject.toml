@@ -85,7 +85,7 @@ include = ["cuvis_ai_dinomaly*"]
 # Local dev: uv sync (no --locked) uses these overrides.
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
-cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core-sam3", editable = true }
+cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
