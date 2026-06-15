@@ -14,30 +14,36 @@ The bedding dataset is a 6-channel hyperspectral still-image set (450 / 550 /
 (61-channel 400–900 nm video). So this util module is purpose-built for
 6-channel still frames, not a copy of ``notebooks/lentils_sliding/utils.py``.
 
-HuggingFace readiness
-~~~~~~~~~~~~~~~~~~~~~
+Data source (HuggingFace by default)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``load_bedding_cu3s_path`` is the *one* function the notebooks should use to
-resolve a frame stem to an on-disk cu3s path. It currently returns a local
-path under ``/mnt/data/bedding_dataset/exported/val/``. The bedding dataset
-has been published to HuggingFace at
-``cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding`` — swapping
-to the remote loader is a 1-line change inside this function (uncomment the
-``hf_hub_download`` branch); the notebooks never need to know.
+The bedding dataset is published on HuggingFace at
+``cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding``. By default
+the notebooks pull cu3s frames, masks, and ``splits.csv`` straight from HF
+(cached under ``BEDDING_HF_CACHE``). Set ``BEDDING_DATA_SOURCE=local`` (env var)
+or edit the module constant to read the fast local copy under ``LOCAL_DATA_ROOT``
+on the dev server instead.
+
+HF cubes are the **native 2400×4900**; the pretrained pipeline trained on a
+center-crop to **1800×4300** (``cube[300:-300, 300:-300]``). ``load_bedding_cube``
+applies that crop transparently so HF inference matches the reported metrics
+bit-for-bit. The masks get the identical crop.
+
+All path resolution goes through ``load_bedding_cu3s_path`` /
+``load_bedding_mask_path`` / ``load_bedding_splits`` / ``load_bedding_cube`` —
+notebooks never construct dataset paths directly, so the HF↔local switch is
+fully transparent.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import yaml
 
 # ---------------------------------------------------------------------------
 # Configuration — single source of truth for every path the notebooks touch
@@ -71,32 +77,47 @@ DEFAULT_EVAL_DIR = Path(
 #: Plugins manifest registering the dinomaly + bedding nodes.
 DEFAULT_PLUGINS_YAML = Path("/home/dev/anish/cuvis-ai-dinomaly/examples/plugins.yaml")
 
-#: Splits CSV (train / val) describing the bedding dataset NPZ frames.
+#: Splits CSV (train / val) describing the bedding dataset NPZ frames (local mode).
 DEFAULT_SPLITS_CSV = Path("/mnt/data/bedding_dataset_npz/bedding_splits_npz.csv")
 
-#: Local-disk root for the cu3s session files (raw hyperspectral cubes).
+#: Local-disk root for the cu3s session files (raw hyperspectral cubes, local mode).
 DEFAULT_CU3S_VAL_ROOT = Path("/mnt/data/bedding_dataset/exported/val")
 
 #: Mask PNG root used by the EAD example's reporting path. Notebooks use this
-#: for the GT overlay when rendering qualitative results.
+#: for the GT overlay when rendering qualitative results (local mode).
 DEFAULT_MASK_ROOT = Path("/mnt/data/bedding_dataset/labels_extracted/labels")
 
-#: HuggingFace repo id used by the planned bedding-6ch dataset upload. Notebooks
-#: Referenced when ``BEDDING_HF_FALLBACK`` is set so users can experiment with
-#: HF loading. The dataset is published at
+#: HuggingFace dataset repo id. The published bedding dataset:
 #: https://huggingface.co/datasets/cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding
 BEDDING_HF_REPO_ID = "cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding"
 BEDDING_HF_CACHE = Path.home() / ".cache" / "cuvis_bedding"
 
+#: Data source: "hf" (default) downloads from BEDDING_HF_REPO_ID and caches under
+#: BEDDING_HF_CACHE; "local" reads from LOCAL_DATA_ROOT (fast, dev-server only).
+#: Override per-session with the ``BEDDING_DATA_SOURCE`` env var or edit here.
+BEDDING_DATA_SOURCE = os.environ.get("BEDDING_DATA_SOURCE", "hf").lower()
+
+#: Local dataset root, used only when ``BEDDING_DATA_SOURCE == "local"``.
+LOCAL_DATA_ROOT = Path("/mnt/data/bedding_dataset")
+
+#: Center-crop applied to native HF cubes (2400×4900) to match the pipeline's
+#: training crop (1800×4300). Mirrors ``EAD_CROP`` in convert_bedding_cu3s_to_npz.py.
+_TRAINING_CROP = (slice(300, -300), slice(300, -300))
+
 
 def resolve_default_config() -> dict[str, Any]:
-    """Resolve every notebook-time path in one dict. Asserts each exists.
+    """Resolve every notebook-time path in one dict.
 
     Notebooks call this once at the top and pass the resulting ``config`` dict
-    around. If a path is missing, the assertion error names the missing path so
-    the user can correct their local environment before debugging deeper.
+    around. The model artefacts (pipeline YAML/PT, plugins manifest) are always
+    asserted to exist — they are NOT on HuggingFace and must be produced by the
+    training notebook or otherwise present locally. The *dataset* paths are only
+    asserted in ``local`` mode; in the default ``hf`` mode they are resolved on
+    demand by the loaders below (and downloaded + cached transparently).
     """
     cfg: dict[str, Any] = {
+        "data_source": BEDDING_DATA_SOURCE,
+        "hf_repo_id": BEDDING_HF_REPO_ID,
         "pipeline_yaml": DEFAULT_PIPELINE_YAML,
         "pipeline_pt": DEFAULT_PIPELINE_PT,
         "eval_dir": DEFAULT_EVAL_DIR,
@@ -107,47 +128,130 @@ def resolve_default_config() -> dict[str, Any]:
         "bedding_all6_nm": BEDDING_ALL6_NM,
         "bedding_all6_labels": BEDDING_ALL6_LABELS,
     }
-    for key in ("pipeline_yaml", "pipeline_pt", "plugins_yaml", "cu3s_val_root"):
+    # Model artefacts must always exist (not distributed via HF).
+    for key in ("pipeline_yaml", "pipeline_pt", "plugins_yaml"):
         assert cfg[key].exists(), f"Missing required path: cfg[{key!r}] = {cfg[key]}"
+    # Dataset paths are only required when reading from the local mount.
+    if BEDDING_DATA_SOURCE == "local":
+        for key in ("splits_csv", "cu3s_val_root"):
+            assert cfg[key].exists(), (
+                f"BEDDING_DATA_SOURCE='local' but missing {key!r} = {cfg[key]}. "
+                f"Set BEDDING_DATA_SOURCE='hf' to download from HuggingFace instead."
+            )
     return cfg
 
 
 # ---------------------------------------------------------------------------
-# HuggingFace-ready data loader
+# Data loaders — HuggingFace by default, local mount via BEDDING_DATA_SOURCE
 # ---------------------------------------------------------------------------
 
-def load_bedding_cu3s_path(frame_stem: str, *, val_root: Path = DEFAULT_CU3S_VAL_ROOT) -> Path:
+def center_crop_to_training(arr: np.ndarray) -> np.ndarray:
+    """Center-crop a native ``2400×4900`` array to the ``1800×4300`` training crop.
+
+    Works for cubes ``[H, W, C]`` and masks ``[H, W]``. Mirrors the
+    ``cube[300:-300, 300:-300]`` slice in
+    ``convert_bedding_cu3s_to_npz.py`` (the EAD-style center crop the pretrained
+    pipeline was trained on). A no-op short-circuit handles arrays that are
+    already cropped (local mode), so it is safe to call unconditionally.
+    """
+    if arr.shape[0] == 1800 and arr.shape[1] == 4300:
+        return arr  # already cropped (local NPZ / cu3s)
+    return arr[_TRAINING_CROP]
+
+
+def _hf_download(filename: str) -> Path:
+    """Download ``filename`` from the HF dataset repo, cached, return its path."""
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as e:  # pragma: no cover - dependency present in env
+        raise RuntimeError(
+            "HF data source requires `huggingface_hub` (pip install huggingface_hub)."
+        ) from e
+    return Path(
+        hf_hub_download(
+            repo_id=BEDDING_HF_REPO_ID,
+            repo_type="dataset",
+            filename=filename,
+            cache_dir=str(BEDDING_HF_CACHE),
+        )
+    )
+
+
+def load_bedding_cu3s_path(frame_stem: str, *, split: str = "val") -> Path:
     """Resolve a frame stem (without ``.cu3s``) to an on-disk cu3s file.
 
-    Today: returns ``val_root / f"{frame_stem}.cu3s"``.
-
-    When the bedding dataset is uploaded to HuggingFace (``BEDDING_HF_REPO_ID``),
-    this function will be updated to call ``huggingface_hub.snapshot_download``
-    behind the scenes and cache under ``BEDDING_HF_CACHE``. Notebooks should
-    never construct cu3s paths directly — always go through this function so
-    the HF switch is fully transparent.
-
-    Set the environment variable ``BEDDING_HF_FALLBACK=1`` to experiment with
-    the HF-loader path early (once the upload happens). Until the upload, this
-    fallback raises ``NotImplementedError`` so we don't accidentally rely on it
-    in CI.
+    HF mode (default): downloads ``data/{split}/{stem}.cu3s`` and returns the
+    cached path. Local mode: returns ``LOCAL_DATA_ROOT/exported/{split}/{stem}.cu3s``.
     """
-    if os.environ.get("BEDDING_HF_FALLBACK") == "1":
+    if BEDDING_DATA_SOURCE == "local":
+        return LOCAL_DATA_ROOT / "exported" / split / f"{frame_stem}.cu3s"
+    return _hf_download(f"data/{split}/{frame_stem}.cu3s")
+
+
+def load_bedding_mask_path(frame_stem: str) -> Path | None:
+    """Resolve a frame stem to its GT mask PNG, or ``None`` if absent.
+
+    Mirrors ``find_mask_png`` in convert_bedding_cu3s_to_npz.py: prefer the
+    cube-side ``{stem}_mask.png``, fall back to the RGB-side
+    ``{stem}_{stem}_(0000|0)_RGB_mask.png``. Normal (all-background) frames have
+    no mask — callers treat ``None`` as an empty mask. Returned masks are native
+    2400×4900 and must be center-cropped by the caller (``center_crop_to_training``).
+    """
+    candidates = (
+        f"{frame_stem}_mask.png",
+        f"{frame_stem}_{frame_stem}_0000_RGB_mask.png",
+        f"{frame_stem}_{frame_stem}_0_RGB_mask.png",
+    )
+    if BEDDING_DATA_SOURCE == "local":
+        for name in candidates:
+            p = DEFAULT_MASK_ROOT / name
+            if p.is_file():
+                return p
+        return None
+    for name in candidates:
         try:
-            from huggingface_hub import hf_hub_download
-        except ImportError as e:
-            raise RuntimeError(
-                "BEDDING_HF_FALLBACK=1 requires `pip install huggingface_hub`."
-            ) from e
-        # When the dataset lands, expected structure: exported/val/<stem>.cu3s
-        # Until then, raise a clear error so notebook authors know the loader
-        # is intentionally local-only for now.
-        raise NotImplementedError(
-            f"HF loading is wired but disabled by default. Uncomment the "
-            f"hf_hub_download branch above to fetch data/val/{frame_stem}.cu3s "
-            f"from {BEDDING_HF_REPO_ID} into {BEDDING_HF_CACHE}/."
-        )
-    return val_root / f"{frame_stem}.cu3s"
+            return _hf_download(f"annotations_raw/labels/{name}")
+        except Exception:
+            continue  # EntryNotFoundError — try the next naming pattern
+    return None
+
+
+def load_bedding_splits():
+    """Return the dataset splits as a pandas DataFrame.
+
+    HF mode: downloads the root ``splits.csv`` (cols: split, stem, cu3s_path,
+    coco_json_path, image_id, filename_label, has_annotation, category_ids,
+    label_fault). Local mode: reads the NPZ splits CSV. In both cases the result
+    exposes at least ``split`` and ``stem`` so notebooks can iterate frames.
+    """
+    import pandas as pd
+
+    if BEDDING_DATA_SOURCE == "local":
+        df = pd.read_csv(DEFAULT_SPLITS_CSV)
+        # Local NPZ CSV uses npz_path; derive a stem column if missing.
+        if "stem" not in df.columns and "npz_path" in df.columns:
+            df["stem"] = df["npz_path"].map(lambda p: Path(str(p)).stem)
+        return df
+    return pd.read_csv(_hf_download("splits.csv"))
+
+
+def load_bedding_cube(frame_stem: str, *, split: str = "val") -> tuple[np.ndarray, np.ndarray]:
+    """Load a frame's cube + wavelengths, center-cropped to the training size.
+
+    Opens the cu3s via ``cuvis.SessionFile`` (downloading from HF first in the
+    default mode), returns ``(cube_hwc_float32_1800x4300x6, wavelengths_nm)``.
+    The crop is applied so the cube matches exactly what the pretrained pipeline
+    saw at train time — HF (native 2400×4900) and local (pre-cropped) paths
+    therefore produce bit-identical model inputs.
+    """
+    import cuvis
+
+    cu3s_path = load_bedding_cu3s_path(frame_stem, split=split)
+    assert cu3s_path.is_file(), f"cu3s not found: {cu3s_path}"
+    mesu = cuvis.SessionFile(str(cu3s_path)).get_measurement(0)
+    cube = np.asarray(mesu.data["cube"].array, dtype=np.float32)
+    wavelengths = np.asarray(mesu.data["cube"].wavelength, dtype=np.int32)
+    return center_crop_to_training(cube), wavelengths
 
 
 # ---------------------------------------------------------------------------
