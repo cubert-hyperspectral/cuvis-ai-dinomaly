@@ -1,6 +1,6 @@
 """Export Dinomaly saved pipeline to NPZ for every measurement in one .cu3s.
 
-Uses ``SingleCu3sDataModule.setup(stage='predict')`` with ``predict_ids=None`` (all frames).
+Uses ``Cu3sDataModule.setup(stage='predict')`` (all frames).
 NPZ keys mirror ``run_saved_dinomaly_pipeline_test_npz.py`` plus ``image_score_topk``.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from cuvis_ai_core.data.datasets import SingleCu3sDataModule
+from cuvis_ai_dataloader.data import Cu3sDataModule
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
 from cuvis_ai_core.utils.node_registry import NodeRegistry
@@ -203,13 +203,9 @@ def main() -> None:
     )
     pipeline.torch_layers.eval()
 
-    dm = SingleCu3sDataModule(
+    dm = Cu3sDataModule(
         cu3s_file_path=str(cu3s_path),
         annotation_json_path=str(ann) if ann else None,
-        train_ids=[],
-        val_ids=[],
-        test_ids=[],
-        predict_ids=None,
         batch_size=args.batch_size,
         processing_mode=args.processing_mode,
     )
