@@ -14,7 +14,7 @@ def test_examples_plugins_manifest_loads_and_registers_nodes() -> None:
 
     manifest = Path(__file__).resolve().parents[1] / "examples" / "plugins.yaml"
     registry = NodeRegistry()
-    registry.register_plugins(str(manifest))
+    registry.register_plugin(str(manifest))
 
     det = registry.get("DinomalyDetector")
     bridge = registry.get("DinomalyTrainLossBridge")
