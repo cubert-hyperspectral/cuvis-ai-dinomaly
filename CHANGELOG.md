@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Adopt the cuvis-ai-core `register_plugin(path)` plugin-registration API (renamed from `register_plugins`) in the manifest-loading test.
+
 ## 0.2.0 - 2026-06-19
 
 - Migrated the example plugin manifest (`examples/plugins.yaml`) to the bare `capabilities:` shape required by cuvis-ai-schemas 0.6.0.
