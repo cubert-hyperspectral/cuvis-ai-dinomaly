@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Adopt the cuvis-ai-core `register_plugin(path)` plugin-registration API (renamed from `register_plugins`) in the manifest-loading test.
+- Require `cuvis-ai-core>=0.10.0` (the release carrying the renamed plugin-registration API).
 
 ## 0.2.0 - 2026-06-19
 
