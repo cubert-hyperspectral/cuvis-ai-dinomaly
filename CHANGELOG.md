@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Migrated the example scripts from the high-level `cuvis_ai.data.MultiFileCu3sDataModule` to `cuvis_ai_dataloader.data.MultiCu3sDataModule`, so the examples load cu3s data through the `cuvis-ai-dataloader` plugin instead of the high-level package. The `pin_memory` / `persistent_workers` / `worker_multiprocessing_context` loader options now go only to `MultiFileNpzDataModule` (which honors them); `MultiCu3sDataModule` rejects them as of dataloader 0.2.0.
+- Declared `cuvis-ai-dataloader` as a provisioned plugin in `configs/plugins/cuvis_ai_dataloader.yaml` (repo + tag `v0.2.0`, `[cu3s, coco]` extras) instead of a package dependency, so this plugin's pyproject no longer hard-depends on a sibling plugin. The `examples` extra keeps only `cuvis-ai>=0.9.0` (which dropped the cuvis SDK), so neither the plugin nor its examples pull the cuvis SDK.
 - Adopt the cuvis-ai-core `register_plugin(path)` plugin-registration API (renamed from `register_plugins`) in the manifest-loading test.
 - Require `cuvis-ai-core>=0.10.0` (the release carrying the renamed plugin-registration API).
 

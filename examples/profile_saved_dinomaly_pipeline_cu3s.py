@@ -23,9 +23,9 @@ import time
 from pathlib import Path
 
 import torch
-from cuvis_ai.data import MultiFileCu3sDataModule
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.node_registry import NodeRegistry
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from loguru import logger
@@ -103,12 +103,10 @@ def main() -> None:
     )
     pipeline.torch_layers.eval()
 
-    datamodule = MultiFileCu3sDataModule(
+    datamodule = MultiCu3sDataModule(
         splits_csv=str(args.splits_csv),
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-        persistent_workers=False,
         processing_mode=args.processing_mode,
     )
     datamodule.setup(stage="test")

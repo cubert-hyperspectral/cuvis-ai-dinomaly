@@ -11,7 +11,6 @@ from typing import Any
 import hydra
 import torch
 import torch.nn.functional as F
-from cuvis_ai.data import MultiFileCu3sDataModule
 from cuvis_ai.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.channel_mixer import ConcreteChannelMixer
 from cuvis_ai.node.data import LentilsAnomalyDataNode
@@ -22,6 +21,7 @@ from cuvis_ai_core.node import Node
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.pipeline import PipelineMetadata, PortSpec
 from cuvis_ai_schemas.training import (
@@ -99,16 +99,18 @@ def main(cfg: DictConfig) -> None:
         "splits_csv": cfg.data.splits_csv,
         "batch_size": cfg.data.batch_size,
         "num_workers": int(cfg.data.get("num_workers", 0)),
-        "pin_memory": bool(cfg.data.get("pin_memory", True)),
-        "persistent_workers": bool(cfg.data.get("persistent_workers", True)),
-        "worker_multiprocessing_context": str(
-            cfg.data.get("worker_multiprocessing_context", "spawn")
-        ),
     }
     if backend == "npz":
-        datamodule = MultiFileNpzDataModule(**common_loader_kwargs)
+        datamodule = MultiFileNpzDataModule(
+            **common_loader_kwargs,
+            pin_memory=bool(cfg.data.get("pin_memory", True)),
+            persistent_workers=bool(cfg.data.get("persistent_workers", True)),
+            worker_multiprocessing_context=str(
+                cfg.data.get("worker_multiprocessing_context", "spawn")
+            ),
+        )
     else:
-        datamodule = MultiFileCu3sDataModule(
+        datamodule = MultiCu3sDataModule(
             **common_loader_kwargs, processing_mode=cfg.data.processing_mode
         )
     datamodule.setup(stage="fit")

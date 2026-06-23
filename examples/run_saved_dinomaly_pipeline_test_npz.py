@@ -37,10 +37,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from cuvis_ai.data import MultiFileCu3sDataModule
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
 from cuvis_ai_core.utils.node_registry import NodeRegistry
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from loguru import logger
@@ -241,13 +241,15 @@ def main() -> None:
         "splits_csv": str(splits_path),
         "batch_size": args.batch_size,
         "num_workers": args.num_workers,
-        "pin_memory": device.type == "cuda",
-        "persistent_workers": False,
     }
     if backend == "npz":
-        datamodule = MultiFileNpzDataModule(**common)
+        datamodule = MultiFileNpzDataModule(
+            **common,
+            pin_memory=device.type == "cuda",
+            persistent_workers=False,
+        )
     else:
-        datamodule = MultiFileCu3sDataModule(
+        datamodule = MultiCu3sDataModule(
             **common,
             processing_mode=args.processing_mode,
         )
