@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Added a `no-local-sources` CI workflow that fails if `pyproject.toml` declares a local `[tool.uv.sources]` path entry (a machine-specific path must not ship in a release).
+
 ## 0.2.0 - 2026-06-23
 
 - Migrated the example plugin manifest (`examples/plugins.yaml`) to the bare `capabilities:` shape required by cuvis-ai-schemas 0.6.0.
