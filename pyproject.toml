@@ -42,7 +42,7 @@ dependencies = [
     # at module load. Plugins should target cuvis-ai-core + cuvis-ai-schemas
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
     "cuvis-ai-core>=0.10.0",
-    "cuvis-ai-schemas>=0.6.0",
+    "cuvis-ai-schemas>=0.7.0",
     "anomalib==2.1.0",
     "kornia==0.6.12",
     "numpy>=1.20.0",
