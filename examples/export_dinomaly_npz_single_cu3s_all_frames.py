@@ -13,10 +13,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from cuvis_ai_dataloader.data import Cu3sDataModule
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
 from cuvis_ai_core.utils.node_registry import NodeRegistry
+from cuvis_ai_dataloader.data import Cu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from loguru import logger
