@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## 0.2.0 - 2026-06-23
+
+- Migrated the example plugin manifest (`examples/plugins.yaml`) to the bare `capabilities:` shape required by cuvis-ai-schemas 0.6.0.
+- Require `cuvis-ai-core>=0.10.0` and `cuvis-ai-schemas>=0.7.0`, adopting the released framework versions. `cuvis-ai-core>=0.10.0` carries the renamed `register_plugin(path)` plugin-registration API.
+- Adopt the cuvis-ai-core `register_plugin(path)` plugin-registration API (renamed from `register_plugins`) in the manifest-loading test.
+- Migrated the example scripts from the high-level `cuvis_ai.data.MultiFileCu3sDataModule` to `cuvis_ai_dataloader.data.MultiCu3sDataModule`, so the examples load cu3s data through the `cuvis-ai-dataloader` plugin instead of the high-level package. The `pin_memory` / `persistent_workers` / `worker_multiprocessing_context` loader options now go only to `MultiFileNpzDataModule` (which honors them); `MultiCu3sDataModule` rejects them as of dataloader 0.2.0.
+- Declared `cuvis-ai-dataloader` as a provisioned plugin in `configs/plugins/cuvis_ai_dataloader.yaml` (repo + tag `v0.2.0`, `[cu3s, coco]` extras) instead of a package dependency, so this plugin's pyproject no longer hard-depends on a sibling plugin. The `examples` extra keeps only `cuvis-ai>=0.9.0` (which dropped the cuvis SDK), so neither the plugin nor its examples pull the cuvis SDK.
+
 ## 0.1.5 - 2026-06-10
 
 - Require `cuvis-ai-core>=0.7.1` and `cuvis-ai-schemas>=0.5.2` (inherits the upstream security floors transitively).
