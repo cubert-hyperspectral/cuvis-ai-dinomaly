@@ -60,78 +60,88 @@ BEDDING_ALL6_LABELS: tuple[str, ...] = (
     "SWIR R (1450 nm)", "SWIR G (1200 nm)", "SWIR B (1050 nm)",
 )
 
-#: Path to the saved high-res ALL6 pipeline used by the inference + results
-#: notebooks. Trained 20 epochs at 672×672, fp32, RTX A4000.
-DEFAULT_PIPELINE_YAML = Path(
-    "/mnt/data/cuvis_ai_outputs/dinomaly_bedding_all6_highres_30ep/trained_models/dinomaly_bedding_all6.yaml"
-)
-DEFAULT_PIPELINE_PT = Path(
-    "/mnt/data/cuvis_ai_outputs/dinomaly_bedding_all6_highres_30ep/trained_models/dinomaly_bedding_all6.pt"
-)
+#: Repo root, auto-detected from this file's location
+#: (``<repo>/notebooks/bedding_anomaly/utils.py`` → ``parents[2]``). Everything
+#: that ships inside the repo (e.g. the plugins manifest) is resolved relative to
+#: this, so the notebooks run from a fresh clone with no path edits.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Path to the saved per-pilot eval outputs (used by the results notebook).
-DEFAULT_EVAL_DIR = Path(
-    "/mnt/data/cuvis_ai_outputs/dinomaly_bedding_all6_highres_30ep/eval_val"
-)
-
-#: Plugins manifest registering the dinomaly + bedding nodes.
-DEFAULT_PLUGINS_YAML = Path("/home/dev/anish/cuvis-ai-dinomaly/examples/plugins.yaml")
-
-#: Splits CSV (train / val) describing the bedding dataset NPZ frames (local mode).
-DEFAULT_SPLITS_CSV = Path("/mnt/data/bedding_dataset_npz/bedding_splits_npz.csv")
-
-#: Local-disk root for the cu3s session files (raw hyperspectral cubes, local mode).
-DEFAULT_CU3S_VAL_ROOT = Path("/mnt/data/bedding_dataset/exported/val")
-
-#: Mask PNG root used by the EAD example's reporting path. Notebooks use this
-#: for the GT overlay when rendering qualitative results (local mode).
-DEFAULT_MASK_ROOT = Path("/mnt/data/bedding_dataset/labels_extracted/labels")
-
-#: HuggingFace dataset repo id. The published bedding dataset:
+# --- HuggingFace repos -----------------------------------------------------
+#: Published bedding *dataset* (cu3s + masks + splits):
 #: https://huggingface.co/datasets/cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding
 BEDDING_HF_REPO_ID = "cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Bedding"
+#: Published trained *model* (pipeline YAML/PT + eval JSON):
+#: https://huggingface.co/cubert-gmbh/dinomaly-bedding-all6
+BEDDING_MODEL_HF_REPO = "cubert-gmbh/dinomaly-bedding-all6"
 BEDDING_HF_CACHE = Path.home() / ".cache" / "cuvis_bedding"
 
-#: Data source: "hf" (default) downloads from BEDDING_HF_REPO_ID and caches under
+# --- Data source toggle (where dataset cu3s/masks/splits come from) --------
+#: "hf" (default) downloads from BEDDING_HF_REPO_ID and caches under
 #: BEDDING_HF_CACHE; "local" reads from LOCAL_DATA_ROOT (fast, dev-server only).
-#: Override per-session with the ``BEDDING_DATA_SOURCE`` env var or edit here.
+#: Override with the ``BEDDING_DATA_SOURCE`` env var or edit here.
 BEDDING_DATA_SOURCE = os.environ.get("BEDDING_DATA_SOURCE", "hf").lower()
 
-#: Local dataset root, used only when ``BEDDING_DATA_SOURCE == "local"``.
-LOCAL_DATA_ROOT = Path("/mnt/data/bedding_dataset")
+#: Local dataset root, used only when ``BEDDING_DATA_SOURCE == "local"``. Env-overridable.
+LOCAL_DATA_ROOT = Path(os.environ.get("BEDDING_LOCAL_ROOT", "/mnt/data/bedding_dataset"))
+
+# --- Pipeline source toggle (where the trained pipeline comes from) --------
+#: "hf" (default) downloads the pretrained pipeline + eval from
+#: BEDDING_MODEL_HF_REPO; "local" uses a pipeline you trained yourself (e.g. the
+#: train notebook's output dir). Override with ``BEDDING_PIPELINE_SOURCE`` /
+#: ``BEDDING_PIPELINE_DIR`` env vars.
+BEDDING_PIPELINE_SOURCE = os.environ.get("BEDDING_PIPELINE_SOURCE", "hf").lower()
+#: Local trained-pipeline dir (the train notebook writes here by default).
+LOCAL_PIPELINE_DIR = Path(
+    os.environ.get(
+        "BEDDING_PIPELINE_DIR",
+        str(REPO_ROOT / "notebooks" / "bedding_anomaly" / "outputs" / "trained_run" / "trained_models"),
+    )
+)
+
+#: Plugins manifest registering the dinomaly + bedding nodes — ships in the repo.
+DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
+
+#: Local-mode dataset paths (used only when ``BEDDING_DATA_SOURCE == "local"``); env-overridable.
+DEFAULT_SPLITS_CSV = Path(
+    os.environ.get("BEDDING_SPLITS_CSV", "/mnt/data/bedding_dataset_npz/bedding_splits_npz.csv")
+)
+DEFAULT_CU3S_VAL_ROOT = LOCAL_DATA_ROOT / "exported" / "val"
+DEFAULT_MASK_ROOT = Path(
+    os.environ.get("BEDDING_MASK_ROOT", "/mnt/data/bedding_dataset/labels_extracted/labels")
+)
 
 #: Center-crop applied to native HF cubes (2400×4900) to match the pipeline's
-#: training crop (1800×4300). Mirrors ``EAD_CROP`` in convert_bedding_cu3s_to_npz.py.
+#: training crop (1800×4300). Mirrors ``EAD_CROP`` in the cu3s→NPZ converter.
 _TRAINING_CROP = (slice(300, -300), slice(300, -300))
 
 
 def resolve_default_config() -> dict[str, Any]:
-    """Resolve every notebook-time path in one dict.
+    """Resolve notebook-time configuration in one dict (lightweight — no downloads).
 
-    Notebooks call this once at the top and pass the resulting ``config`` dict
-    around. The model artefacts (pipeline YAML/PT, plugins manifest) are always
-    asserted to exist — they are NOT on HuggingFace and must be produced by the
-    training notebook or otherwise present locally. The *dataset* paths are only
-    asserted in ``local`` mode; in the default ``hf`` mode they are resolved on
-    demand by the loaders below (and downloaded + cached transparently).
+    Notebooks call this once at the top. It records the source toggles + repo-relative
+    paths and asserts only the plugins manifest (which ships in the repo). The trained
+    pipeline and eval artefacts are resolved lazily by :func:`resolve_pipeline` /
+    :func:`resolve_eval_dir` so the *training* notebook (which makes its own pipeline)
+    never triggers the model download. Local dataset paths are asserted only in
+    ``local`` data mode.
     """
     cfg: dict[str, Any] = {
         "data_source": BEDDING_DATA_SOURCE,
+        "pipeline_source": BEDDING_PIPELINE_SOURCE,
         "hf_repo_id": BEDDING_HF_REPO_ID,
-        "pipeline_yaml": DEFAULT_PIPELINE_YAML,
-        "pipeline_pt": DEFAULT_PIPELINE_PT,
-        "eval_dir": DEFAULT_EVAL_DIR,
+        "model_hf_repo": BEDDING_MODEL_HF_REPO,
         "plugins_yaml": DEFAULT_PLUGINS_YAML,
         "splits_csv": DEFAULT_SPLITS_CSV,
         "cu3s_val_root": DEFAULT_CU3S_VAL_ROOT,
         "mask_root": DEFAULT_MASK_ROOT,
+        "local_pipeline_dir": LOCAL_PIPELINE_DIR,
         "bedding_all6_nm": BEDDING_ALL6_NM,
         "bedding_all6_labels": BEDDING_ALL6_LABELS,
     }
-    # Model artefacts must always exist (not distributed via HF).
-    for key in ("pipeline_yaml", "pipeline_pt", "plugins_yaml"):
-        assert cfg[key].exists(), f"Missing required path: cfg[{key!r}] = {cfg[key]}"
-    # Dataset paths are only required when reading from the local mount.
+    assert DEFAULT_PLUGINS_YAML.exists(), (
+        f"Plugins manifest not found at {DEFAULT_PLUGINS_YAML}. "
+        f"Run the notebook from inside the cuvis-ai-dinomaly repo."
+    )
     if BEDDING_DATA_SOURCE == "local":
         for key in ("splits_csv", "cu3s_val_root"):
             assert cfg[key].exists(), (
@@ -139,6 +149,76 @@ def resolve_default_config() -> dict[str, Any]:
                 f"Set BEDDING_DATA_SOURCE='hf' to download from HuggingFace instead."
             )
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Trained-pipeline + eval resolution (HuggingFace model repo, or local-trained)
+# ---------------------------------------------------------------------------
+
+def _hf_model_download(filename: str) -> Path:
+    """Download ``filename`` from the HF *model* repo, cached, return its path."""
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as e:  # pragma: no cover
+        raise RuntimeError(
+            "HF pipeline source requires `huggingface_hub` (pip install huggingface_hub)."
+        ) from e
+    return Path(
+        hf_hub_download(
+            repo_id=BEDDING_MODEL_HF_REPO,
+            repo_type="model",
+            filename=filename,
+            cache_dir=str(BEDDING_HF_CACHE),
+        )
+    )
+
+
+def resolve_pipeline() -> tuple[Path, Path]:
+    """Return ``(yaml_path, pt_path)`` for the trained pipeline.
+
+    Default (``BEDDING_PIPELINE_SOURCE='hf'``): downloads the pretrained pipeline
+    from :data:`BEDDING_MODEL_HF_REPO` (the ~580 MB ``.pt`` is fetched + cached on
+    first use). ``'local'``: uses the pipeline you trained yourself in
+    :data:`LOCAL_PIPELINE_DIR` (the train notebook's output) — picks the single
+    ``*.yaml`` there and its sibling ``.pt``.
+    """
+    if BEDDING_PIPELINE_SOURCE == "local":
+        d = LOCAL_PIPELINE_DIR
+        yamls = sorted(d.glob("*.yaml"))
+        assert yamls, (
+            f"BEDDING_PIPELINE_SOURCE='local' but no *.yaml in {d}. "
+            f"Train one with the training notebook first, or set BEDDING_PIPELINE_SOURCE=hf."
+        )
+        yaml_path = yamls[0]
+        pt_path = yaml_path.with_suffix(".pt")
+        assert pt_path.is_file(), f"Missing weights next to {yaml_path.name}: {pt_path}"
+        return yaml_path, pt_path
+    return _hf_model_download("dinomaly_bedding_all6.yaml"), _hf_model_download(
+        "dinomaly_bedding_all6.pt"
+    )
+
+
+def resolve_eval_dir() -> Path | None:
+    """Return a directory holding ``report.json`` (+ per-class / Dice JSON), or ``None``.
+
+    ``'hf'``: downloads the ``eval_val/*.json`` metrics from the model repo and
+    returns their cache dir. ``'local'``: the ``eval_val`` sibling of
+    :data:`LOCAL_PIPELINE_DIR`, if present. ``None`` means the headline/per-class
+    cells should skip gracefully.
+    """
+    if BEDDING_PIPELINE_SOURCE == "local":
+        d = LOCAL_PIPELINE_DIR.parent / "eval_val"
+        return d if (d / "report.json").is_file() else None
+    try:
+        report = _hf_model_download("eval_val/report.json")
+    except Exception:
+        return None
+    for extra in ("eval_val/per_class_auroc.json", "eval_val/dice_recompute.json"):
+        try:
+            _hf_model_download(extra)
+        except Exception:
+            pass
+    return report.parent
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +296,7 @@ def load_bedding_mask_path(frame_stem: str) -> Path | None:
     return None
 
 
-def load_bedding_splits():
+def load_bedding_splits() -> Any:
     """Return the dataset splits as a pandas DataFrame.
 
     HF mode: downloads the root ``splits.csv`` (cols: split, stem, cu3s_path,

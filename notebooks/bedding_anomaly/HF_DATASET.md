@@ -43,21 +43,24 @@ SDK dir) before launching Jupyter.
 
 ## How the notebooks use it
 
-- **Inference** (`bedding_all6_inference_tutorial.ipynb`): `load_bedding_cube`
-  downloads + crops a frame, builds the model batch directly from the cube (no
-  NPZ), and runs the pretrained pipeline.
-- **Training** (`bedding_all6_train_tutorial.ipynb`): `snapshot_download`s the
-  dataset, then `convert_bedding_cu3s_to_npz.py` writes cropped per-frame NPZ +
-  a splits CSV that `train_bedding_all6.py` consumes. NPZ conversion is currently
-  required for training (no multi-file cu3s datamodule / center-crop node exists
-  yet — see the "Future work" note in the notebook).
+- **Inference** (`bedding_all6_inference_tutorial.ipynb`): `resolve_pipeline()`
+  downloads the pretrained pipeline from the model repo (or uses your own via
+  `BEDDING_PIPELINE_SOURCE=local`); `load_bedding_cube` downloads + crops a frame
+  and builds the model batch directly from the cube (no NPZ). Self-contained.
+- **Training** (`bedding_all6_train_tutorial.ipynb`): fully inline — downloads the
+  dataset, converts cu3s → cropped NPZ, builds the 6-channel pipeline node-by-node,
+  runs statistical-init + gradient training (`MAX_EPOCHS` knob), and saves the
+  pipeline. No external scripts. Its output feeds straight back into the inference
+  notebook via `BEDDING_PIPELINE_SOURCE=local`.
 
-## Caveat: model artefacts are not on HF
+## Trained model on HuggingFace
 
-The **dataset** is on HuggingFace, but the **pretrained pipeline**
-(`dinomaly_bedding_all6.yaml` / `.pt`) and the eval-output artefacts
-(`eval_val/report.json`, per-class JSON, ROC PNGs) live under
-`/mnt/data/cuvis_ai_outputs/...` and are **not** distributed via HF. A fresh-clone
-user must either run the training notebook to produce a pipeline, or obtain the
-trained artefacts separately. Uploading the trained pipeline to an HF model repo
-is future work.
+The pretrained pipeline + validation metrics are published as a model repo:
+**[`cubert-gmbh/dinomaly-bedding-all6`](https://huggingface.co/cubert-gmbh/dinomaly-bedding-all6)**
+(`dinomaly_bedding_all6.yaml` + ~580 MB `.pt` + `eval_val/*.json`). The inference
+notebook fetches it by default — no local artefacts required. To run your own
+instead, train with the training notebook and set `BEDDING_PIPELINE_SOURCE=local`
+(+ optionally `BEDDING_PIPELINE_DIR`).
+
+Loading the pipeline requires the cuvis SDK + high-level `cuvis-ai` (it uses
+`cuvis_ai.node.*` built-ins).
