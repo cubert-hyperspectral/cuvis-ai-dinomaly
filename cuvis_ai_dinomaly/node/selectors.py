@@ -1,18 +1,31 @@
 """Hyperspectral band selectors used by the Dinomaly plugin.
 
-This file currently provides :class:`FixedHyperspectralSelector` — a generalisation
-of :class:`cuvis_ai.node.channel_selector.FixedWavelengthSelector` that accepts any
-number of target wavelengths (the upstream version is hard-typed to a 3-tuple).
-It is intentionally a thin, no-normalize selector: experiments in the bedding pilot
-(May 2026) showed that the upstream selector's per-frame min-max normalize compresses
-small-anomaly Dice — see :func:`eval_bedding_rgb.optimal_f1_dice(use_raw=True)`.
+This file provides :class:`FixedHyperspectralSelector` — a thin, no-normalize
+selector that picks the nearest band for each of ``n`` target wavelengths and
+stacks them in order (``[B, H, W, n]``).
 
-Why a separate node instead of generalising the upstream selector
------------------------------------------------------------------
-Keeping the change inside the plugin (a) avoids a cross-repo PR blocker for the
-6-channel bedding-all6 pilot and (b) bakes in the no-normalize default the bedding
-A/B already validated. If a future selector needs the running-bounds / statistical
-norm-mode behaviour, the upstream selector remains the right choice.
+Upstream parity
+---------------
+:class:`cuvis_ai.node.channel_selector.FixedWavelengthSelector` was generalised to
+``n`` channels in cuvis-ai#39 (released in cuvis-ai 0.9+) and now produces
+**bit-for-bit identical** output to this class for the no-normalize path (same
+``nearest-band-per-target → torch.stack`` logic; verified, max abs diff 0.0).
+Migration note: upstream requires ``norm_mode="per_frame"`` for ``n != 3`` (its
+default ``"running"`` raises, since the running/statistical paths assume 3-element
+buffers). Originally this plugin copy existed because the upstream selector was
+hard-typed to a 3-tuple.
+
+Why this copy is retained (not deleted post-#39)
+------------------------------------------------
+(a) The plugin must not depend on the high-level ``cuvis-ai`` package — importing it
+    eagerly loads the proprietary Cuvis SDK (see pyproject), so a plugin-registered
+    selector node cannot pull ``FixedWavelengthSelector`` from there.
+(b) Already-saved pipelines — including the published HF model
+    ``cubert-gmbh/dinomaly-bedding-all6`` — reference this class by import path;
+    deleting it would break loading them without a pipeline re-save + re-upload.
+Fully switching the *bedding workflow* (notebooks + cookbook training script, which
+already use high-level ``cuvis-ai`` nodes) to the upstream selector is folded into
+the core-0.10 migration.
 """
 
 from __future__ import annotations
