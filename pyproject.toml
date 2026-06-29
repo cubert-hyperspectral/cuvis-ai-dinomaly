@@ -41,8 +41,8 @@ dependencies = [
     # eagerly imports the proprietary Cuvis SDK (cuvis_il sys.exit / native libs)
     # at module load. Plugins should target cuvis-ai-core + cuvis-ai-schemas
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
-    "cuvis-ai-core>=0.7.1",
-    "cuvis-ai-schemas>=0.5.2",
+    "cuvis-ai-core>=0.10.0",
+    "cuvis-ai-schemas>=0.7.0",
     "anomalib==2.1.0",
     "kornia==0.6.12",
     "numpy>=1.20.0",
@@ -68,6 +68,14 @@ dev = [
     "bandit[toml]>=1.7.5",
     "twine>=6.2.0",
 ]
+# The example scripts (examples/) import the high-level `cuvis-ai` node library and
+# load cu3s data through the `cuvis-ai-dataloader` plugin. The data plugin is declared
+# in configs/plugins/cuvis_ai_dataloader.yaml and provisioned into the run env rather
+# than pinned here, so this plugin does not hard-depend on a sibling plugin. cuvis-ai
+# 0.9.0 dropped the cuvis SDK, so the examples pull no SDK.
+examples = [
+    "cuvis-ai>=0.9.0",
+]
 
 [project.urls]
 Homepage = "https://www.cubert-hyperspectral.com/"
@@ -85,7 +93,7 @@ include = ["cuvis_ai_dinomaly*"]
 # Local dev: uv sync (no --locked) uses these overrides.
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
-cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
+# cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

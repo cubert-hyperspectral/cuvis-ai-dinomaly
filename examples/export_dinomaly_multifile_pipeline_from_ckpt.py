@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Literal
 
 import torch
-from cuvis_ai.data import MultiFileCu3sDataModule
 from cuvis_ai.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.channel_selector import CIRSelector, FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
@@ -35,6 +34,7 @@ from cuvis_ai.node.normalization import MinMaxNormalizer
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PipelineMetadata
@@ -85,16 +85,18 @@ def build_pipeline_and_datamodule(
         "splits_csv": str(splits_csv_path),
         "batch_size": int(cfg.data.batch_size),
         "num_workers": 0,
-        "pin_memory": bool(cfg.data.get("pin_memory", True)),
-        "persistent_workers": False,
-        "worker_multiprocessing_context": str(
-            cfg.data.get("worker_multiprocessing_context", "spawn")
-        ),
     }
     if backend == "npz":
-        datamodule = MultiFileNpzDataModule(**common_loader_kwargs)
+        datamodule = MultiFileNpzDataModule(
+            **common_loader_kwargs,
+            pin_memory=bool(cfg.data.get("pin_memory", True)),
+            persistent_workers=False,
+            worker_multiprocessing_context=str(
+                cfg.data.get("worker_multiprocessing_context", "spawn")
+            ),
+        )
     else:
-        datamodule = MultiFileCu3sDataModule(
+        datamodule = MultiCu3sDataModule(
             **common_loader_kwargs,
             processing_mode=str(cfg.data.processing_mode),
         )

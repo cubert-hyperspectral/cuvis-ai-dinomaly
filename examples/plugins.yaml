@@ -1,9 +1,8 @@
 # Local plugin manifest (path relative to this file). See cuvis-ai plugin-system docs.
-plugins:
-  dinomaly:
-    path: ".."
-    provides:
-      - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
-      - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
-      - class_name: cuvis_ai_dinomaly.node.selectors.FixedHyperspectralSelector
-      - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
+name: dinomaly
+path: ".."
+capabilities:
+  - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
+  - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+  - class_name: cuvis_ai_dinomaly.node.selectors.FixedHyperspectralSelector
+  - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
