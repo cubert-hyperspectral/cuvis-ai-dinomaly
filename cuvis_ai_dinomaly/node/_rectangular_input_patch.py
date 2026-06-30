@@ -28,19 +28,62 @@ Call once after `DinomalyModel.__init__` finishes (which is what we do in
 
 from __future__ import annotations
 
+import importlib.metadata
 from typing import Any
 
 import torch
 from loguru import logger
 
+# anomalib versions whose ``get_encoder_decoder_outputs`` /
+# ``_process_features_for_spatial_output`` internals the reimplementations below
+# reproduce **verbatim** (see module docstring). The square path delegates to
+# anomalib; this rectangular path is a frozen copy, so it can silently diverge if
+# anomalib changes those two methods. When the installed anomalib is not in this
+# set, re-verify the reimplementation against the new
+# ``anomalib/models/image/dinomaly/torch_model.py`` and then add the version here.
+_VERIFIED_ANOMALIB_VERSIONS = frozenset({"2.1.0"})
+
+
+def _assert_anomalib_version_verified() -> None:
+    """Fail loudly if the rectangular reimpl hasn't been verified against the
+    installed anomalib (its internals are copied verbatim and can drift silently)."""
+    try:
+        installed = importlib.metadata.version("anomalib")
+    except importlib.metadata.PackageNotFoundError:  # pragma: no cover
+        # anomalib present but without dist metadata (vendored / source / editable):
+        # we cannot verify the version, so warn rather than break a legit install.
+        logger.warning(
+            "Could not determine the installed anomalib version; the rectangular-input "
+            "patch reimplements anomalib internals verbatim and is verified only against "
+            "{}. Proceeding unverified.",
+            sorted(_VERIFIED_ANOMALIB_VERSIONS),
+        )
+        return
+    if installed not in _VERIFIED_ANOMALIB_VERSIONS:
+        raise RuntimeError(
+            f"cuvis-ai-dinomaly's rectangular-input patch reimplements "
+            f"DinomalyModel.get_encoder_decoder_outputs and "
+            f"_process_features_for_spatial_output verbatim (see "
+            f"_rectangular_input_patch.py docstring), but those were copied from anomalib "
+            f"{sorted(_VERIFIED_ANOMALIB_VERSIONS)} and the installed version is "
+            f"{installed!r}. anomalib {installed} may have changed those methods, which "
+            f"would make the rectangular path silently diverge from the (delegated) square "
+            f"path. Re-verify the reimplementation against anomalib {installed}'s "
+            f"anomalib/models/image/dinomaly/torch_model.py, then add {installed!r} to "
+            f"_VERIFIED_ANOMALIB_VERSIONS in this file."
+        )
+
 
 def patch_dinomaly_model_for_rectangular_input(model: Any, patch_size: int = 14) -> None:
     """Install non-square-grid-aware versions of two anomalib methods on `model`.
 
-    No-op if already patched.
+    No-op if already patched. Raises ``RuntimeError`` if the installed anomalib is
+    not one this patch has been verified against (the reimpl is a verbatim copy of
+    anomalib internals — see :data:`_VERIFIED_ANOMALIB_VERSIONS`).
     """
     if getattr(model, "_rect_patch_applied", False):
         return
+    _assert_anomalib_version_verified()
 
     def _process_features_for_spatial_output_rect(self, features: list, hp: int, wp: int) -> list:
         # Mirror of anomalib's original (lines 388-396) — only the reshape target changes.

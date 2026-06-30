@@ -140,6 +140,57 @@ def test_rect_patch_is_idempotent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# anomalib version guard: the reimpl is a verbatim copy of anomalib internals,
+# so it must refuse to run against an unverified anomalib (would silently diverge).
+# ---------------------------------------------------------------------------
+
+
+def test_version_guard_passes_on_verified_anomalib() -> None:
+    """The installed (pinned 2.1.0) anomalib is in the verified set → no raise."""
+    import importlib.metadata
+
+    from cuvis_ai_dinomaly.node import _rectangular_input_patch as rp
+
+    assert importlib.metadata.version("anomalib") in rp._VERIFIED_ANOMALIB_VERSIONS
+    rp._assert_anomalib_version_verified()  # must not raise
+
+
+def test_version_guard_raises_on_unverified_anomalib() -> None:
+    """An anomalib version outside the verified set must raise (not silently run the
+    stale verbatim reimpl)."""
+    from cuvis_ai_dinomaly.node import _rectangular_input_patch as rp
+
+    with patch.object(rp.importlib.metadata, "version", return_value="2.99.0"):
+        with pytest.raises(RuntimeError, match="rectangular-input patch"):
+            rp._assert_anomalib_version_verified()
+
+
+def test_version_guard_warns_when_version_unknown() -> None:
+    """If anomalib has no dist metadata (source/editable), warn + proceed, don't break."""
+    from cuvis_ai_dinomaly.node import _rectangular_input_patch as rp
+
+    with patch.object(
+        rp.importlib.metadata,
+        "version",
+        side_effect=rp.importlib.metadata.PackageNotFoundError("anomalib"),
+    ):
+        rp._assert_anomalib_version_verified()  # must not raise
+
+
+def test_rect_patch_blocks_unverified_anomalib_at_install() -> None:
+    """The guard fires through the public entrypoint on a fresh (unpatched) model."""
+    from cuvis_ai_dinomaly.node import _rectangular_input_patch as rp
+
+    model = _FakeDinomalyModel()
+    with patch.object(rp.importlib.metadata, "version", return_value="2.99.0"):
+        with pytest.raises(RuntimeError, match="silently diverge"):
+            rp.patch_dinomaly_model_for_rectangular_input(model, patch_size=14)
+    assert not getattr(model, "_rect_patch_applied", False), (
+        "model must not be marked patched when the version guard rejects it"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Forward output shapes
 # ---------------------------------------------------------------------------
 
