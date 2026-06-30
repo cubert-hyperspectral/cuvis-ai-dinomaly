@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## 0.3.0 - 2026-06-30
+
+- **N-channel input.** `DinomalyDetector(input_channels=N)` inflates the pretrained DINOv2 patch-embed Conv2d from 3 to N channels by duplicate-and-halve, preserving activation magnitude at init. The inflated stem stays frozen (anomalib runs the encoder under `torch.no_grad()`, so it receives no gradient); only the bottleneck and decoder train. Defaults to 3 for full backward compatibility.
+- **Rectangular `image_size` / `crop_size`.** `DinomalyDetector` now accepts an `int` (square, unchanged) or an `(h, w)` tuple. For non-square inputs it patches anomalib's square-grid reshape in `DinomalyModel.get_encoder_decoder_outputs`; the square path stays byte-identical. A hard version guard raises if the installed anomalib is outside the verified set, since the rectangular reshape copies anomalib internals verbatim.
+- **Optional `fast_inference` API.** New `fast_inference` / `use_tf32` / `autocast_dtype` / `compile_mode` kwargs plus `warmup()` enable a validated TF32 + bf16-autocast + `torch.compile` recipe (measured 3.6x to 8.4x speedup, no metric drift). All default off, so existing pipelines stay bit-identical; compile is gated to inference/val/test and never fires during training.
+- **Streaming `AnomalyAUROCMetrics` node.** Pixel and image AUROC via torchmetrics `BinaryAUROC` accumulated across batches with O(thresholds) state, replacing a bespoke callback and the per-pixel CPU concat. This is a training-time monitoring metric; the authoritative AUROC remains the sklearn pass in the eval script.
+- **Retired the plugin-local selector.** Dropped `FixedHyperspectralSelector` and its test in favor of upstream `cuvis_ai.node.channel_selector.FixedWavelengthSelector` (n-channel, order-preserving, `normalize_output=False`), available in `cuvis-ai>=0.10.0`. The `examples` extra now floors `cuvis-ai>=0.10.0`.
+- **Restored legacy 3-channel input scaling.** A uint8 RGB frame with max in `(1, 255]` divides by a fixed 255 again (a max-200 frame maps to 0.784, not 1.0); only reflectance input with max > 255 uses the per-cube max. Keeps existing 3-channel pipelines bit-identical.
+- **Single source for COCO helpers.** `MultiFileNpzDataset` re-imports `_build_category_mask` / `_parse_coco_json` from `_coco_utils` instead of a diverged local copy, removing an undeclared `scikit-image` dependency (clean-install `ImportError`) and a test-vs-runtime builder mismatch.
+- Migrated the README and example scripts from the removed `load_plugins` to `register_plugin` (cuvis-ai-core 0.10).
+- Registered `AnomalyAUROCMetrics` in `examples/plugins.yaml`.
+- Added bedding-anomaly train and inference tutorial notebooks under `notebooks/bedding_anomaly/`.
 - Added a `no-local-sources` CI workflow that fails if `pyproject.toml` declares a local `[tool.uv.sources]` path entry (a machine-specific path must not ship in a release).
 
 ## 0.2.0 - 2026-06-23
