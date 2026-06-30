@@ -4,9 +4,17 @@ Mirrors the :class:`cuvis_ai.node.metrics.AnomalyDetectionMetrics` pattern: a
 ``torchmetrics`` ``BinaryAUROC`` with histogram ``thresholds`` (so per-epoch state is
 O(thresholds), not the couple-GB-per-epoch CPU concat of every pixel) is accumulated
 via ``update()`` across batches and reset on the ``(stage, epoch)`` boundary. Each
-forward emits the *running* AUROC as a :class:`~cuvis_ai_schemas.execution.Metric`; the
-trainer's per-batch metric collection logs it, and the epoch's last batch carries the
-true epoch-level value. No bespoke Lightning callback is needed.
+forward emits the *running* AUROC as a :class:`~cuvis_ai_schemas.execution.Metric`. No
+bespoke Lightning callback is needed.
+
+This is a **training-time monitoring** metric, not the authoritative score. The trainer
+logs each ``Metric.value`` as a float per batch and Lightning reduces per-epoch with its
+``on_epoch`` default (mean), so the reported epoch scalar is the *mean of the per-batch
+running AUROCs* — an approximation of, not equal to, the exact pooled AUROC. Core 0.10
+exposes no epoch-end hook and ``Context`` has no last-batch flag, so the node cannot force
+a single exact compute through this channel. The authoritative whole-dataset AUROC is
+computed separately (sklearn ``roc_auc_score`` over all pooled frames in the bedding eval
+script); that is what the published metrics use.
 
 Scores are passed through ``sigmoid`` before the binned metric so the thresholds span
 ``[0, 1]``; AUROC is rank-invariant under a monotonic transform, so the value is
@@ -43,8 +51,8 @@ class AnomalyAUROCMetrics(Node):
 
     Output ports
     ------------
-    metrics : ``list[Metric]`` — running ``auroc_pixel`` / ``auroc_image`` (the epoch's
-        last batch holds the true epoch-level value).
+    metrics : ``list[Metric]`` — running ``auroc_pixel`` / ``auroc_image`` (monitoring;
+        the trainer mean-reduces these per epoch — see the module docstring).
     """
 
     _category = NodeCategory.METRIC
@@ -81,9 +89,9 @@ class AnomalyAUROCMetrics(Node):
         super().__init__(
             name=name, execution_stages=execution_stages, thresholds=thresholds, **kwargs
         )
-        # Histogram-based AUROC: O(thresholds) state, accumulated across batches and
-        # reset only at the (stage, epoch) boundary (so the per-batch value is a running
-        # AUROC and the last batch of the epoch is the true epoch value).
+        # Histogram-based AUROC: O(thresholds) state, accumulated across batches and reset
+        # only at the (stage, epoch) boundary, so each forward's value is a running AUROC.
+        # The trainer mean-reduces these per epoch (monitoring) — see the module docstring.
         self.pixel_auroc = BinaryAUROC(thresholds=thresholds)
         self.image_auroc = BinaryAUROC(thresholds=thresholds)
         self._last_key: tuple[ExecutionStage, int] | None = None
