@@ -226,7 +226,7 @@ def main() -> None:
     logger.info("Device: {}, backend: {}", device, backend)
 
     registry = NodeRegistry()
-    registry.load_plugins(str(plugins_path))
+    registry.register_plugin(str(plugins_path))
 
     pipeline = CuvisPipeline.load_pipeline(
         yaml_path,

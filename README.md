@@ -69,29 +69,29 @@ Adapter node that maps `training_loss` → `loss` for the `GradientTrainer` `los
 
 ## Plugin manifest
 
-Drop one of these into your `plugins.yaml` and load with `NodeRegistry.load_plugins(...)`.
+Drop one of these into your `plugins.yaml` and load it with `NodeRegistry().register_plugin("plugins.yaml")` (core ≥ 0.10; the old `load_plugins` was removed). The manifest uses the capabilities shape: a top-level `name`, a source (`path`, or `repo` + `tag`), and a `capabilities` list of `class_name` entries.
 
 **Local path** (development; iterate alongside the consumer pipeline):
 
 ```yaml
-plugins:
-  dinomaly:
-    path: "../cuvis-ai-dinomaly"
-    provides:
-      - cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
-      - cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+name: dinomaly
+path: "../cuvis-ai-dinomaly"
+capabilities:
+  - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
+  - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+  - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
 ```
 
 **Git tag** (reproducible install from a tagged release):
 
 ```yaml
-plugins:
-  dinomaly:
-    repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly.git"
-    tag: "v0.1.4"
-    provides:
-      - cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
-      - cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+name: dinomaly
+repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly.git"
+tag: "v0.1.4"
+capabilities:
+  - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
+  - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
+  - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
 ```
 
 A ready-to-use local-path manifest is committed at [`examples/plugins.yaml`](examples/plugins.yaml).

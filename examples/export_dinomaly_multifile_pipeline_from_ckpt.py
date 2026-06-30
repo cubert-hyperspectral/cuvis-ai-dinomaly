@@ -71,7 +71,7 @@ def build_pipeline_and_datamodule(
     """Match ``examples/dinomaly_multifile_train_common.py`` graph construction."""
     plugins_manifest = Path(__file__).resolve().parent / "plugins.yaml"
     registry = NodeRegistry()
-    registry.load_plugins(str(plugins_manifest))
+    registry.register_plugin(str(plugins_manifest))
     DinomalyDetector = NodeRegistry.get("cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector")
     DinomalyTrainLossBridge = NodeRegistry.get(
         "cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge",
