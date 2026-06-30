@@ -311,6 +311,45 @@ def test_input_channels_3_default_still_works(patched_dinomaly: DinomalyDetector
     assert len(det.IMAGENET_STD) == 3
 
 
+def _recover_scaled(det: DinomalyDetector, frame: torch.Tensor) -> torch.Tensor:
+    """Run the detector's input scaling and undo the ImageNet normalize, recovering the
+    [0, 1]-scaled value. Frames are spatially uniform so the internal Resize is a no-op."""
+    x = det._rgb_bhwc_to_model_input(frame)  # [1, C, H, W], post ImageNet normalize
+    c = x.shape[1]
+    mean = torch.tensor(det.IMAGENET_MEAN).view(1, c, 1, 1)
+    std = torch.tensor(det.IMAGENET_STD).view(1, c, 1, 1)
+    return x * std + mean
+
+
+def test_uint8_3ch_scaling_is_fixed_255(patched_dinomaly: DinomalyDetector) -> None:
+    """Review #2 BC: a non-saturated uint8 3-ch frame (max 200) must scale by a FIXED
+    255 -> 0.784, NOT by the per-cube max (which would give 1.0 and drift the scores)."""
+    frame = torch.full((1, 16, 16, 3), 200, dtype=torch.uint8)
+    recovered = _recover_scaled(patched_dinomaly, frame)
+    assert torch.allclose(recovered, torch.full_like(recovered, 200.0 / 255.0), atol=1e-4)
+
+
+def test_reflectance_3ch_scaling_uses_per_cube_max(patched_dinomaly: DinomalyDetector) -> None:
+    """Review #2: a 3-ch reflectance frame (max 10000) must scale by the per-cube max,
+    NOT the fixed /255 (which would saturate everything to 1.0). Channel 0 at 5000 must
+    recover to 0.5; under the buggy /255 path it would clamp to 1.0."""
+    frame = torch.zeros((1, 16, 16, 3), dtype=torch.float32)
+    frame[..., 0] = 5000.0
+    frame[..., 1] = 10000.0
+    frame[..., 2] = 10000.0
+    recovered = _recover_scaled(patched_dinomaly, frame)
+    assert torch.allclose(recovered[:, 0], torch.full_like(recovered[:, 0], 0.5), atol=1e-4)
+    assert torch.allclose(recovered[:, 1], torch.ones_like(recovered[:, 1]), atol=1e-4)
+
+
+def test_reflectance_6ch_scaling_uses_per_cube_max(patched_dinomaly_6ch: DinomalyDetector) -> None:
+    """6-ch reflectance (max 38000) scales by per-cube max -> 1.0, unchanged from the
+    behaviour the published bedding model was trained on."""
+    frame = torch.full((1, 16, 16, 6), 38000.0, dtype=torch.float32)
+    recovered = _recover_scaled(patched_dinomaly_6ch, frame)
+    assert torch.allclose(recovered, torch.ones_like(recovered), atol=1e-4)
+
+
 def test_input_channels_invalid_raises() -> None:
     """Non-positive-multiple-of-3 channel counts must raise at construction time."""
     for bad in (0, -3, 4, 5, 7, 8):

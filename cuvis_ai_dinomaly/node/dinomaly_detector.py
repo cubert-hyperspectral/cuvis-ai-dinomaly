@@ -370,19 +370,21 @@ class DinomalyDetector(Node):
         if x.dtype != torch.float32:
             x = x.float()
         max_val = float(x.max())
-        # Scale to [0, 1] robustly by dividing by the per-cube max whenever it
-        # exceeds 1.0. This handles lentils-style uint16 reflectance (max ~10000),
-        # bedding-style float reflectance with specular highlights (max ~38000),
-        # and legacy uint8 RGB (max ~255) uniformly — for fully-saturated uint8
-        # input this is mathematically identical to the old "/ 255" path, and
-        # for under-saturated uint8 input the slightly higher contrast is
-        # absorbed by the downstream ImageNet normalize.
-        # IMPORTANT: do NOT pre-scale reflectance to [0, 1] in the dataset/
-        # converter — store the raw cuvis output (u16-encoded reflectance or
-        # equivalent) so this branch fires and per-cube max-scaling stays
-        # consistent across the codebase.
-        if max_val > 1.0:
+        # Defensive [0, 1] scaling for input that is NOT already normalized. Most
+        # pipelines put a MinMaxNormalizer (dataset-wide running stats) upstream, so
+        # x already arrives in [0, 1] (max <= 1) and neither branch below fires. When
+        # raw data reaches the detector directly we distinguish by magnitude:
+        #   - max > 255      -> reflectance (u16/float, ANY channel count): divide by
+        #                       the per-cube max. Handles lentils ~10k and bedding
+        #                       ~38000 without saturating, 3-ch or n-ch alike.
+        #   - 1 < max <= 255 -> legacy uint8 RGB: divide by a FIXED 255. A non-saturated
+        #                       frame (e.g. max 200) maps to 0.784, NOT 1.0 — this is
+        #                       byte-identical to the original 3-ch path. Using per-cube
+        #                       max here would silently drift existing RGB pipelines.
+        if max_val > 255.0:
             x = x / max_val
+        elif max_val > 1.0:
+            x = x / 255.0
         x = x.clamp(0.0, 1.0)
         x = x.permute(0, 3, 1, 2)
         return self._preprocess(x)
