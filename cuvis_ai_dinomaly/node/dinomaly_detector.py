@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import torch
@@ -18,16 +19,33 @@ from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize
 class DinomalyDetector(Node):
     """Pixel-level anomaly detection using Anomalib's ``DinomalyModel``.
 
-    Expects RGB (or false-color) images ``[B, H, W, 3]`` from a channel selector.
+    Expects channel-stacked images ``[B, H, W, input_channels]`` from a channel selector.
+    ``input_channels`` defaults to 3 (RGB / false-color, fully backward compatible).
+    For multi-channel hyperspectral input (e.g. ``input_channels=6`` for VIS+SWIR),
+    the DINOv2 patch-embed conv is inflated from 3→N input channels via duplicate+halve
+    (see ``_patch_embed_inflation.py``), and the inflated patch-embed conv becomes
+    trainable while the rest of the encoder stays frozen.
+
+    Channel-order contract for ``input_channels > 3``: the caller MUST supply input
+    channels grouped as ``[c0, c1, c2, c0', c1', c2', ...]`` (descending λ within each
+    triplet, semantically-paired triplets stacked). This matches the inflated conv's
+    weight layout so each output filter sees consistent per-slot input statistics at init.
+
     Preprocessing matches Anomalib defaults by default: resize, optional center crop,
-    ImageNet normalize. Set ``use_center_crop=False`` to use only ``Resize`` + ``Normalize``
-    (e.g. when matching a no-crop Anomalib setup).
+    ImageNet normalize. For ``input_channels > 3`` the ImageNet mean/std vectors are
+    tiled (e.g. ``[R,G,B,R,G,B]`` for 6ch) — a neutral choice that pairs with the
+    duplicate-and-halve inflation, which is a *fixed activation-parity stem* (see below).
 
     Training
     --------
     - Emits ``training_loss`` (scalar) for :class:`DinomalyTrainLossBridge`.
-    - Only bottleneck and decoder weights are trainable; the DINOv2 encoder stays frozen.
-    - Override :meth:`unfreeze` / :meth:`freeze` preserve encoder freezing.
+    - Only bottleneck and decoder are trainable; the DINOv2 encoder stays frozen.
+    - >3-ch path: same as above. The inflated patch-embed is **not** trainable in
+      practice — anomalib runs the encoder under ``torch.no_grad()`` and uses its
+      detached features only as reconstruction targets, so ``patch_embed.proj`` receives
+      no gradient. The inflation is a fixed stem that folds the extra bands into the
+      embedding via the pretrained VIS weights (pinned by
+      ``test_inflated_patch_embed_gets_no_gradient``).
 
     Inference
     ---------
@@ -37,8 +55,9 @@ class DinomalyDetector(Node):
     INPUT_SPECS = {
         "rgb_image": PortSpec(
             dtype=torch.float32,
-            shape=(-1, -1, -1, 3),
-            description="RGB image [B, H, W, 3] in float32 (0–1 or 0–255)",
+            shape=(-1, -1, -1, -1),
+            description="Channel-stacked image [B, H, W, C] in float32 (0–1 or 0–255). "
+            "C must equal the detector's input_channels (default 3).",
         ),
     }
 
@@ -61,8 +80,10 @@ class DinomalyDetector(Node):
         ),
     }
 
-    IMAGENET_MEAN = (0.485, 0.456, 0.406)
-    IMAGENET_STD = (0.229, 0.224, 0.225)
+    # Base (3-channel) ImageNet statistics. For input_channels>3 these are tiled
+    # at __init__ time into instance attributes of the right length.
+    _IMAGENET_MEAN_3 = (0.485, 0.456, 0.406)
+    _IMAGENET_STD_3 = (0.229, 0.224, 0.225)
 
     def __init__(
         self,
@@ -73,11 +94,40 @@ class DinomalyDetector(Node):
         fuse_layer_encoder: list[list[int]] | None = None,
         fuse_layer_decoder: list[list[int]] | None = None,
         remove_class_token: bool = False,
-        image_size: int = 448,
-        crop_size: int = 392,
+        image_size: int | tuple[int, int] | list[int] = 448,
+        crop_size: int | tuple[int, int] | list[int] = 392,
         use_center_crop: bool = True,
+        input_channels: int = 3,
+        fast_inference: bool = False,
+        use_tf32: bool | None = None,
+        autocast_dtype: str | torch.dtype | None = None,
+        compile_mode: str | None = None,
         **kwargs: Any,
     ) -> None:
+        """See class docstring for the parameter explanations.
+
+        Fast-inference parameters (all default to off → bit-exact backward compatibility):
+
+        - ``fast_inference``: convenience flag that resolves to the validated recipe
+          (``use_tf32=True``, ``autocast_dtype=torch.bfloat16``, ``compile_mode='reduce-overhead'``).
+          Measured lossless speedup 3.6×–8.4× depending on resolution; full benchmark
+          recipe in ``examples/bedding_dinomaly/benchmark_inference_speedups.py``
+          and ``verify_fast_inference_metrics.py`` of the cuvis-ai-cookbook.
+        - ``use_tf32``: enable TF32 matmul precision (``torch.set_float32_matmul_precision('high')``).
+          PROCESS-WIDE side effect — affects all torch matmuls in the process, not just
+          this detector.
+        - ``autocast_dtype``: wrap the model forward in ``torch.autocast(..., dtype=...)``.
+          ``torch.bfloat16`` requires Ampere or newer (sm_80+); we check at construction.
+          May be passed as a string (``"bfloat16"`` / ``"float16"``) for YAML serialisation.
+        - ``compile_mode``: apply ``torch.compile(model, mode=...)`` lazily on the first
+          INFERENCE/VALIDATION forward. NEVER applied during training (would break gradient
+          flow under our existing freeze/unfreeze pattern). Use ``warmup()`` to pay the
+          10-30s compile cost up front instead of on the first real batch.
+
+        All four parameters default to off. The convenience flag honours explicit
+        power-user overrides (e.g. ``fast_inference=True, autocast_dtype='float16'``
+        keeps fp16 instead of bf16).
+        """
         self.encoder_name = encoder_name
         self.bottleneck_dropout = float(bottleneck_dropout)
         self.decoder_depth = int(decoder_depth)
@@ -85,9 +135,90 @@ class DinomalyDetector(Node):
         self.fuse_layer_encoder = fuse_layer_encoder
         self.fuse_layer_decoder = fuse_layer_decoder
         self.remove_class_token = bool(remove_class_token)
-        self.image_size = int(image_size)
-        self.crop_size = int(crop_size)
+
+        # ------------------------------------------------------------------
+        # Fast-inference resolution — lossless 3.6×–8.4× speedup across pilots
+        # validated by examples/bedding_dinomaly/{benchmark_inference_speedups,
+        # verify_fast_inference_metrics}.py in cuvis-ai-cookbook. All defaults
+        # preserve byte-identical behaviour with prior versions.
+        # ------------------------------------------------------------------
+        def _resolve_autocast_dtype(v: str | torch.dtype | None) -> torch.dtype | None:
+            if v is None:
+                return None
+            if isinstance(v, torch.dtype):
+                return v
+            # Accept string for YAML-serialised pipelines.
+            mapping = {
+                "bfloat16": torch.bfloat16,
+                "bf16": torch.bfloat16,
+                "float16": torch.float16,
+                "fp16": torch.float16,
+                "float32": torch.float32,
+                "fp32": torch.float32,
+            }
+            if v not in mapping:
+                raise ValueError(
+                    f"DinomalyDetector: autocast_dtype must be None, a torch.dtype, "
+                    f"or one of {list(mapping)}, got {v!r}"
+                )
+            return mapping[v]
+
+        autocast_resolved = _resolve_autocast_dtype(autocast_dtype)
+        if fast_inference:
+            # Umbrella flag fills in the recipe; explicit per-knob args still win.
+            self._use_tf32 = True if use_tf32 is None else bool(use_tf32)
+            self._autocast_dtype = (
+                torch.bfloat16 if autocast_resolved is None else autocast_resolved
+            )
+            self._compile_mode = "reduce-overhead" if compile_mode is None else str(compile_mode)
+        else:
+            self._use_tf32 = bool(use_tf32) if use_tf32 is not None else False
+            self._autocast_dtype = autocast_resolved
+            self._compile_mode = str(compile_mode) if compile_mode is not None else None
+        self._compiled = False  # lazy: compile happens on first INFERENCE/VAL forward
+        self._compile_shape: tuple[int, int] | None = None  # for shape-change warning
+
+        # Guard: bf16 autocast requires Ampere or newer. Fail loudly at construction
+        # rather than at the first forward.
+        if self._autocast_dtype is torch.bfloat16 and torch.cuda.is_available():
+            if not torch.cuda.is_bf16_supported():
+                raise RuntimeError(
+                    "DinomalyDetector: autocast_dtype=torch.bfloat16 (or fast_inference=True) "
+                    "requires an Ampere or newer GPU (sm_80+). Detected GPU does not support "
+                    "bf16. Pass `autocast_dtype='float16'` or `autocast_dtype=None` instead."
+                )
+
+        # Apply TF32 immediately (idempotent — global state, no-op if already 'high').
+        if self._use_tf32:
+            torch.set_float32_matmul_precision("high")
+            logger.info("DinomalyDetector: TF32 matmul precision enabled (process-wide setting)")
+
+        # Accept int (square) or (h, w) tuple/list (aspect-preserving). Internally
+        # store as (h, w) tuple so downstream code is shape-agnostic. A bare int
+        # behaves exactly as before (backward compatible with all saved pipelines).
+        def _to_hw(x, name: str) -> tuple[int, int]:
+            if isinstance(x, int):
+                return (int(x), int(x))
+            if isinstance(x, (tuple, list)) and len(x) == 2:
+                return (int(x[0]), int(x[1]))
+            raise ValueError(f"{name} must be int or (h, w) tuple/list, got {x!r}")
+
+        self.image_size = _to_hw(image_size, "image_size")
+        self.crop_size = _to_hw(crop_size, "crop_size")
         self.use_center_crop = bool(use_center_crop)
+        self.input_channels = int(input_channels)
+        if self.input_channels <= 0 or self.input_channels % 3 != 0:
+            raise ValueError(
+                f"DinomalyDetector: input_channels must be a positive multiple of 3 "
+                f"(got {self.input_channels}). The patch-embed inflation needs the new "
+                f"channel count to be an integer multiple of the pretrained 3."
+            )
+        # Instance-level ImageNet stats: tile the 3-vectors to length input_channels.
+        # E.g. for 6ch: [R,G,B,R,G,B] — pairs with the duplicate-and-halve patch-embed
+        # surgery so each output filter sees matched per-slot input statistics at init.
+        factor = self.input_channels // 3
+        self.IMAGENET_MEAN = self._IMAGENET_MEAN_3 * factor
+        self.IMAGENET_STD = self._IMAGENET_STD_3 * factor
 
         super().__init__(
             encoder_name=encoder_name,
@@ -100,6 +231,17 @@ class DinomalyDetector(Node):
             image_size=image_size,
             crop_size=crop_size,
             use_center_crop=use_center_crop,
+            input_channels=input_channels,
+            fast_inference=fast_inference,
+            use_tf32=use_tf32,
+            # Re-serialise dtype as the user passed it — for YAML round-trip,
+            # canonicalise torch.dtype to its short string form.
+            autocast_dtype=(
+                autocast_dtype
+                if not isinstance(autocast_dtype, torch.dtype)
+                else str(autocast_dtype).removeprefix("torch.")
+            ),
+            compile_mode=compile_mode,
             **kwargs,
         )
 
@@ -115,12 +257,43 @@ class DinomalyDetector(Node):
             remove_class_token=remove_class_token,
         )
         self.add_module("dinomaly_model", model)
+        # Rectangular-input support: anomalib's DinomalyModel hard-codes a square
+        # patch-grid reshape (sqrt(N_tokens) × sqrt(N_tokens)). Only patch when
+        # we're actually using a rectangular input — square inputs keep the
+        # original code path untouched for full backward compat.
+        if self.image_size[0] != self.image_size[1]:
+            from cuvis_ai_dinomaly.node._rectangular_input_patch import (
+                patch_dinomaly_model_for_rectangular_input,
+            )
+
+            # Infer patch_size from the encoder's patch_embed.proj (kernel = stride = patch)
+            patch_size = int(model.encoder.patch_embed.proj.kernel_size[0])
+            patch_dinomaly_model_for_rectangular_input(model, patch_size=patch_size)
+        # Patch-embed inflation for multi-channel input. Done AFTER the pretrained
+        # encoder has loaded so we surgically replace the 3-ch proj in place.
+        if self.input_channels != 3:
+            from cuvis_ai_dinomaly.node._patch_embed_inflation import (
+                inflate_conv2d_input_channels,
+            )
+
+            old_proj = model.encoder.patch_embed.proj
+            new_proj = inflate_conv2d_input_channels(old_proj, self.input_channels)
+            model.encoder.patch_embed.proj = new_proj
+            # Some PatchEmbed implementations cache in_chans for downstream sanity checks.
+            if hasattr(model.encoder.patch_embed, "in_chans"):
+                model.encoder.patch_embed.in_chans = self.input_channels
+            logger.info(
+                "DinomalyDetector: inflated patch-embed Conv2d from {} → {} input channels",
+                old_proj.in_channels,
+                self.input_channels,
+            )
         self._freeze_encoder_unfreeze_head()
 
         self._preprocess = self._build_preprocess_compose()
 
     def _build_preprocess_compose(self) -> Compose:
-        steps: list = [Resize((self.image_size, self.image_size))]
+        # self.image_size and self.crop_size are always (h, w) tuples (see __init__).
+        steps: list = [Resize(self.image_size)]
         if self.use_center_crop:
             steps.append(CenterCrop(self.crop_size))
         steps.append(
@@ -136,6 +309,50 @@ class DinomalyDetector(Node):
             p.requires_grad_(True)
         for p in model.decoder.parameters():
             p.requires_grad_(True)
+        # The inflated patch-embed stays FROZEN (covered by the encoder freeze loop
+        # above). anomalib runs the DINOv2 encoder blocks under ``torch.no_grad()``
+        # (torch_model.py) and uses their detached outputs purely as reconstruction
+        # targets, so ``patch_embed.proj`` never receives a gradient regardless of its
+        # ``requires_grad`` flag — unfreezing it would be a no-op (pinned by
+        # ``test_inflated_patch_embed_gets_no_gradient``). The 3->n inflation is therefore
+        # a *fixed activation-parity stem*: the duplicated-and-halved weights fold the
+        # extra (e.g. SWIR) bands into the embedding through the pretrained VIS weights;
+        # only the bottleneck + decoder are trained.
+
+    def warmup(self, sample_input: Tensor | None = None) -> None:
+        """Pre-compile the model so the first real inference doesn't pay torch.compile cost.
+
+        - No-op if ``compile_mode is None`` or compile has already happened.
+        - When ``sample_input`` is None, fabricates a zero ``[1, H, W, input_channels]``
+          tensor on the model's current device, matching ``self.image_size`` and
+          ``self.input_channels``. Caller can pass a representative tensor explicitly
+          if they want to avoid the warmup landing on shape ``self.image_size``
+          and triggering a later recompile on the real inference batch shape.
+
+        Use after pipeline load + before the first real batch:
+
+            detector.warmup()                # synthetic input, takes ~10-30s
+            # … real inference proceeds at the compiled-fast latency
+        """
+        if not self._compile_mode or self._compiled:
+            return
+        if sample_input is None:
+            h, w = self.image_size  # always (h, w) after _to_hw in __init__
+            device = next(self.dinomaly_model.parameters()).device
+            dtype = next(self.dinomaly_model.parameters()).dtype
+            # Build a [B=1, H, W, C] input in the same layout the forward expects.
+            sample_input = torch.zeros(1, h, w, self.input_channels, device=device, dtype=dtype)
+        # Use a synthetic INFERENCE context so the compile guard above fires.
+        ctx = Context(stage=ExecutionStage.INFERENCE, epoch=0, batch_idx=0, global_step=0)
+        with torch.inference_mode():
+            self.forward(sample_input, context=ctx)
+        logger.info(
+            "DinomalyDetector: warmup complete — torch.compile cost paid up front "
+            "(compile_mode={}, shape={}×{})",
+            self._compile_mode,
+            sample_input.shape[1],
+            sample_input.shape[2],
+        )
 
     def unfreeze(self) -> None:
         """Train bottleneck + decoder only; encoder stays frozen."""
@@ -153,10 +370,17 @@ class DinomalyDetector(Node):
         if x.dtype != torch.float32:
             x = x.float()
         max_val = float(x.max())
-        # Backward-compatible behavior:
-        # - [0,1] input: unchanged
-        # - [0,255]-like input: divide by 255 (legacy path)
-        # - values above 255: robustly scale by observed max
+        # Defensive [0, 1] scaling for input that is NOT already normalized. Most
+        # pipelines put a MinMaxNormalizer (dataset-wide running stats) upstream, so
+        # x already arrives in [0, 1] (max <= 1) and neither branch below fires. When
+        # raw data reaches the detector directly we distinguish by magnitude:
+        #   - max > 255      -> reflectance (u16/float, ANY channel count): divide by
+        #                       the per-cube max. Handles lentils ~10k and bedding
+        #                       ~38000 without saturating, 3-ch or n-ch alike.
+        #   - 1 < max <= 255 -> legacy uint8 RGB: divide by a FIXED 255. A non-saturated
+        #                       frame (e.g. max 200) maps to 0.784, NOT 1.0 — this is
+        #                       byte-identical to the original 3-ch path. Using per-cube
+        #                       max here would silently drift existing RGB pipelines.
         if max_val > 255.0:
             x = x / max_val
         elif max_val > 1.0:
@@ -186,12 +410,52 @@ class DinomalyDetector(Node):
 
         if need_train_loss:
             model.train()
+            # Training path: NEVER apply autocast or torch.compile here. Both would
+            # interact poorly with the existing freeze/unfreeze pattern and break
+            # gradient flow. The fast_inference flag is documented as inference-only.
             tl = model(x, global_step=gs)
             out["training_loss"] = tl if tl.dim() == 0 else tl.reshape(())
 
+        # Lazy torch.compile — gated on opt-in + non-training stage + once-only.
+        # Done AFTER the training-loss branch so train forwards remain uncompiled.
+        if (
+            self._compile_mode
+            and not self._compiled
+            and stage in (ExecutionStage.INFERENCE, ExecutionStage.VAL, ExecutionStage.TEST)
+        ):
+            self.dinomaly_model = torch.compile(self.dinomaly_model, mode=self._compile_mode)
+            model = self.dinomaly_model  # rebind local for the eval call below
+            self._compiled = True
+            self._compile_shape = (x.shape[-2], x.shape[-1])
+            logger.info(
+                "DinomalyDetector: torch.compile applied (mode={}, first-forward shape={}×{})",
+                self._compile_mode,
+                x.shape[-2],
+                x.shape[-1],
+            )
+        elif (
+            self._compiled
+            and self._compile_shape is not None
+            and (x.shape[-2], x.shape[-1]) != self._compile_shape
+        ):
+            logger.warning(
+                "DinomalyDetector: input shape changed from {}×{} (compile cache) to {}×{} — "
+                "torch.compile will recompile, expect a one-time latency spike.",
+                self._compile_shape[0],
+                self._compile_shape[1],
+                x.shape[-2],
+                x.shape[-1],
+            )
+            self._compile_shape = (x.shape[-2], x.shape[-1])
+
         # Scores: eval forward (matches Anomalib validation inference path).
         # Always no_grad here: loss backprops only through training_loss branch.
-        with torch.no_grad():
+        autocast_ctx = (
+            torch.autocast(device_type=x.device.type, dtype=self._autocast_dtype)
+            if self._autocast_dtype is not None
+            else contextlib.nullcontext()
+        )
+        with torch.no_grad(), autocast_ctx:
             model.eval()
             pred = model(x)
 
@@ -201,8 +465,11 @@ class DinomalyDetector(Node):
         scores = F.interpolate(amap, size=(h, w), mode="bilinear", align_corners=False)
         scores = scores.permute(0, 2, 3, 1)
 
-        out["scores"] = scores
-        out["anomaly_score"] = pred.pred_score
+        # Cast to fp32 to satisfy OUTPUT_SPECS regardless of autocast / mixed-precision.
+        # Lightning's precision="16-mixed" makes the model return fp16 tensors, which the
+        # pipeline runtime port validator would reject against the float32 declaration.
+        out["scores"] = scores.to(torch.float32)
+        out["anomaly_score"] = pred.pred_score.to(torch.float32)
 
         if need_train_loss:
             model.train()

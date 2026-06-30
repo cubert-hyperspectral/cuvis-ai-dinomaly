@@ -12,3 +12,10 @@ diagnostics/
 outputs/
 presentation_docs/
 pre_trained/
+notebooks/bedding_anomaly/pre_trained/
+
+# Lab-only scratch / one-off scripts that don't belong in the plugin repo.
+# Keep them on local disk for personal use; canonical copies for the bedding
+# work live in cuvis-ai-cookbook/examples/bedding_dinomaly/. See the cookbook
+# README's "Outstanding investigations" for the cleanup plan.
+scripts/

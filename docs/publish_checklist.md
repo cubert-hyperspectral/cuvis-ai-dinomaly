@@ -11,14 +11,14 @@ uv sync --no-sources --extra dev
 # Fast test suite — must be green before tagging
 uv run --no-sources --extra dev pytest tests/ -m "not slow" -v --tb=short
 
-# Manifest smoke test — confirm NodeRegistry can load both nodes
+# Manifest smoke test — confirm NodeRegistry can load the plugin (3 nodes)
 uv run --no-sources --extra dev python -c "
 from cuvis_ai_core.utils.node_registry import NodeRegistry
 r = NodeRegistry()
-r.load_plugins('examples/plugins.yaml')
-print(sorted(r.list_plugins().keys()))
+r.register_plugin('examples/plugins.yaml')
+print(sorted(r.list_plugins()))
 "
-# Expected: ['DinomalyDetector', 'DinomalyTrainLossBridge']
+# Expected: ['dinomaly']
 ```
 
 ## 2. Confirm release metadata
@@ -65,8 +65,8 @@ After the tag is pushed, confirm the plugin loads from the git-tag manifest (not
 uv run python -c "
 from cuvis_ai_core.utils.node_registry import NodeRegistry
 r = NodeRegistry()
-r.load_plugins('configs/plugins/dinomaly.yaml')  # uses repo + tag
-print(sorted(r.list_plugins().keys()))
+r.register_plugin('configs/plugins/dinomaly.yaml')  # uses repo + tag
+print(sorted(r.list_plugins()))
 "
 ```
 
