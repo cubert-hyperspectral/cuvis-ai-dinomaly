@@ -1,45 +1,39 @@
-"""Epoch-level pixel-AUROC and image-AUROC for Dinomaly.
+"""Streaming pixel-AUROC + image-AUROC for Dinomaly (validation / test).
 
-Ported 1:1 from the equivalent Dinomaly2 implementation. The correct long-term home
-is a generic ``AnomalyAUROCMetrics`` node in ``cuvis-ai`` (metrics.py) with a matching
-epoch-start/end hook added to ``cuvis-ai-core``'s ``GradientTrainer``.
+Mirrors the :class:`cuvis_ai.node.metrics.AnomalyDetectionMetrics` pattern: a
+``torchmetrics`` ``BinaryAUROC`` with histogram ``thresholds`` (so per-epoch state is
+O(thresholds), not the couple-GB-per-epoch CPU concat of every pixel) is accumulated
+via ``update()`` across batches and reset on the ``(stage, epoch)`` boundary. Each
+forward emits the *running* AUROC as a :class:`~cuvis_ai_schemas.execution.Metric`; the
+trainer's per-batch metric collection logs it, and the epoch's last batch carries the
+true epoch-level value. No bespoke Lightning callback is needed.
 
-Design
-------
-``AnomalyAUROCMetrics`` is a plain :class:`~cuvis_ai_core.node.node.Node` that
-accumulates raw predictions on CPU during forward passes (val/test only) and returns
-an empty metrics list each batch. :class:`AUROCEpochEndCallback` is a Lightning
-:class:`~lightning.pytorch.callbacks.Callback` that:
+Scores are passed through ``sigmoid`` before the binned metric so the thresholds span
+``[0, 1]``; AUROC is rank-invariant under a monotonic transform, so the value is
+unchanged.
 
-- calls ``node.reset()`` on epoch start (val and test)
-- calls ``node.compute_auroc()`` on epoch end and logs via ``pl_module.log()``
-
-Both classes must be wired together in the train-common script. See
-``cuvis-ai-cookbook/examples/bedding_dinomaly/train_bedding_all6.py`` for the
-expected wiring pattern.
+NOTE (deferred): the long-term home is upstream next to ``AnomalyDetectionMetrics`` in
+``cuvis-ai`` ``metrics.py``. Moving it is deferred because it would break the import
+path of already-saved pipelines (incl. the published HF model) and needs a cuvis-ai
+release + a pipeline re-point — tracked alongside the selector retirement.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import pytorch_lightning as pl
 import torch
 from cuvis_ai_core.node.node import Node
 from cuvis_ai_schemas.enums import ExecutionStage, NodeCategory, NodeTag
-from cuvis_ai_schemas.execution import Context
+from cuvis_ai_schemas.execution import Context, Metric
 from cuvis_ai_schemas.pipeline import PortSpec
-from lightning.pytorch.callbacks import Callback
-from loguru import logger
+from torchmetrics.classification import BinaryAUROC
 
 Tensor = torch.Tensor
 
 
 class AnomalyAUROCMetrics(Node):
-    """Accumulate pixel/image scores across an epoch for AUROC computation.
-
-    Does NOT emit any ``Metric`` objects per batch — AUROC is only meaningful at the
-    epoch level. :class:`AUROCEpochEndCallback` triggers the actual compute.
+    """Streaming pixel/image AUROC via torchmetrics (val/test only).
 
     Input ports
     -----------
@@ -49,7 +43,8 @@ class AnomalyAUROCMetrics(Node):
 
     Output ports
     ------------
-    metrics : ``list[Metric]`` — always empty; logging happens via the callback.
+    metrics : ``list[Metric]`` — running ``auroc_pixel`` / ``auroc_image`` (the epoch's
+        last batch holds the true epoch-level value).
     """
 
     _category = NodeCategory.METRIC
@@ -73,119 +68,71 @@ class AnomalyAUROCMetrics(Node):
         ),
     }
     OUTPUT_SPECS = {
-        "metrics": PortSpec(dtype=list, shape=(), description="Always empty list"),
+        "metrics": PortSpec(
+            dtype=list, shape=(), description="List of Metric objects (running AUROC)"
+        ),
     }
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, thresholds: int = 200, **kwargs: Any) -> None:
+        self.thresholds = thresholds
         name, execution_stages = Node.consume_base_kwargs(
             kwargs, {ExecutionStage.VAL, ExecutionStage.TEST}
         )
-        super().__init__(name=name, execution_stages=execution_stages, **kwargs)
-        self._pixel_preds: list[Tensor] = []
-        self._pixel_targets: list[Tensor] = []
-        self._image_preds: list[Tensor] = []
-        self._image_targets: list[Tensor] = []
+        super().__init__(
+            name=name, execution_stages=execution_stages, thresholds=thresholds, **kwargs
+        )
+        # Histogram-based AUROC: O(thresholds) state, accumulated across batches and
+        # reset only at the (stage, epoch) boundary (so the per-batch value is a running
+        # AUROC and the last batch of the epoch is the true epoch value).
+        self.pixel_auroc = BinaryAUROC(thresholds=thresholds)
+        self.image_auroc = BinaryAUROC(thresholds=thresholds)
+        self._last_key: tuple[ExecutionStage, int] | None = None
 
     def reset(self) -> None:
-        self._pixel_preds.clear()
-        self._pixel_targets.clear()
-        self._image_preds.clear()
-        self._image_targets.clear()
-
-    def compute_auroc(self) -> dict[str, float]:
-        """Compute epoch-level AUROC from accumulated predictions.
-
-        Returns an empty dict if no data was accumulated or if all targets are the
-        same class (AUROC is undefined in that case).
-        """
-        if not self._pixel_preds:
-            return {}
-
-        try:
-            from torchmetrics.functional.classification import binary_auroc
-        except ImportError:
-            logger.warning("torchmetrics not available — skipping AUROC computation")
-            return {}
-
-        results: dict[str, float] = {}
-
-        # Pixel AUROC.
-        all_pixel_preds = torch.cat(self._pixel_preds)
-        all_pixel_tgts = torch.cat(self._pixel_targets)
-        if all_pixel_tgts.long().sum() > 0 and (~all_pixel_tgts).long().sum() > 0:
-            results["auroc_pixel"] = float(binary_auroc(all_pixel_preds, all_pixel_tgts.long()))
-        else:
-            logger.warning("Pixel AUROC skipped: all targets are the same class")
-
-        # Image AUROC.
-        all_image_preds = torch.cat(self._image_preds)
-        all_image_tgts = torch.cat(self._image_targets)
-        if all_image_tgts.sum() > 0 and (all_image_tgts == 0).sum() > 0:
-            results["auroc_image"] = float(binary_auroc(all_image_preds, all_image_tgts))
-        else:
-            logger.warning("Image AUROC skipped: all images are the same class")
-
-        return results
+        """Reset both running accumulators (kept for explicit external use/tests)."""
+        self.pixel_auroc.reset()
+        self.image_auroc.reset()
+        self._last_key = None
 
     def forward(
         self,
         scores: Tensor,
         targets: Tensor,
         anomaly_score: Tensor,
-        context: Context,  # noqa: ARG002
+        context: Context,
     ) -> dict[str, Any]:
-        # Accumulate pixel-level predictions on CPU so the GPU doesn't keep huge
-        # 1800×4300 score maps live until epoch end.
-        self._pixel_preds.append(scores.squeeze(-1).flatten().float().detach().cpu())
-        self._pixel_targets.append(targets.squeeze(-1).flatten().bool().detach().cpu())
+        # Reset on the (stage, epoch) boundary so each epoch accumulates fresh.
+        key = (context.stage, context.epoch)
+        if self._last_key != key:
+            self.pixel_auroc.reset()
+            self.image_auroc.reset()
+            self._last_key = key
 
-        # Image label: anomalous if any pixel in the GT mask is positive.
-        img_labels = targets.squeeze(-1).flatten(1).any(dim=1).long().detach().cpu()
-        self._image_preds.append(anomaly_score.float().detach().cpu())
-        self._image_targets.append(img_labels)
+        # Pixel-level: sigmoid -> [0, 1] for the binned metric (AUROC is rank-invariant).
+        pix_preds = torch.sigmoid(scores.squeeze(-1).flatten().float())
+        pix_tgts = targets.squeeze(-1).flatten().long()
+        self.pixel_auroc.update(pix_preds, pix_tgts)
 
-        return {"metrics": []}
+        # Image-level: per-image score vs "any GT pixel positive" label.
+        img_preds = torch.sigmoid(anomaly_score.float().flatten())
+        img_tgts = targets.squeeze(-1).flatten(1).any(dim=1).long()
+        self.image_auroc.update(img_preds, img_tgts)
 
-
-class AUROCEpochEndCallback(Callback):
-    """Reset accumulator at epoch start; compute and log AUROC at epoch end.
-
-    Pass an instance of this to ``GradientTrainer(callbacks=[...])`` alongside
-    :class:`AnomalyAUROCMetrics` wired into the pipeline graph.
-    """
-
-    def __init__(
-        self, auroc_node: AnomalyAUROCMetrics, node_log_prefix: str = "metrics_auroc"
-    ) -> None:
-        super().__init__()
-        self._node = auroc_node
-        self._prefix = node_log_prefix
-
-    # ------------------------------------------------------------------ val ----
-    def on_validation_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        self._node.reset()
-
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        metrics = self._node.compute_auroc()
-        for name, value in metrics.items():
-            pl_module.log(f"{self._prefix}/{name}", value, prog_bar=True, on_epoch=True)
-            logger.info("Val epoch AUROC — {}/{}: {:.4f}", self._prefix, name, value)
-        # Defragment the allocator before returning to training: val forward passes
-        # (eval-mode anomaly map + Gaussian smoothing) leave many small reserved
-        # segments that can prevent training-step allocations.
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    # ------------------------------------------------------------------ test ---
-    def on_test_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        self._node.reset()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        metrics = self._node.compute_auroc()
-        for name, value in metrics.items():
-            pl_module.log(f"{self._prefix}/{name}", value, prog_bar=True, on_epoch=True)
-            logger.info("Test epoch AUROC — {}/{}: {:.4f}", self._prefix, name, value)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        return {
+            "metrics": [
+                Metric(
+                    name="auroc_pixel",
+                    value=float(self.pixel_auroc.compute()),
+                    stage=context.stage,
+                    epoch=context.epoch,
+                    batch_idx=context.batch_idx,
+                ),
+                Metric(
+                    name="auroc_image",
+                    value=float(self.image_auroc.compute()),
+                    stage=context.stage,
+                    epoch=context.epoch,
+                    batch_idx=context.batch_idx,
+                ),
+            ]
+        }

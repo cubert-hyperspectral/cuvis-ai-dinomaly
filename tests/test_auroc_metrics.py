@@ -1,15 +1,14 @@
-"""Tests for AnomalyAUROCMetrics + AUROCEpochEndCallback (dinomaly2-style)."""
+"""Tests for the streaming AnomalyAUROCMetrics node (torchmetrics BinaryAUROC)."""
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 import pytest
 import torch
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
+from torchmetrics.classification import BinaryAUROC
 
-from cuvis_ai_dinomaly.node.auroc_metrics import AnomalyAUROCMetrics, AUROCEpochEndCallback
+from cuvis_ai_dinomaly.node.auroc_metrics import AnomalyAUROCMetrics
 
 
 def _ctx(stage: ExecutionStage = ExecutionStage.VAL, epoch: int = 0, batch_idx: int = 0) -> Context:
@@ -23,51 +22,75 @@ def _batch(b: int, h: int, w: int, score_value: float, all_anomaly: bool):
     return scores, targets, anomaly_score
 
 
-def test_forward_returns_empty_metrics_list() -> None:
-    node = AnomalyAUROCMetrics()
-    scores, targets, anom = _batch(1, 4, 4, score_value=0.5, all_anomaly=True)
-    out = node.forward(scores=scores, targets=targets, anomaly_score=anom, context=_ctx())
-    assert out == {"metrics": []}
+def _names(metrics) -> set[str]:
+    return {m.name for m in metrics}
 
 
-def test_compute_auroc_perfect_separation() -> None:
+def test_forward_emits_running_auroc_metrics() -> None:
+    """Each forward emits running auroc_pixel + auroc_image as Metric objects (no callback)."""
     node = AnomalyAUROCMetrics()
-    # Frame 0 — all positive GT, high score.
+    s, t, a = _batch(1, 4, 4, score_value=0.5, all_anomaly=True)
+    out = node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx())
+    assert _names(out["metrics"]) == {"auroc_pixel", "auroc_image"}
+    for m in out["metrics"]:
+        assert m.stage == ExecutionStage.VAL and isinstance(m.value, float)
+
+
+def test_running_auroc_perfect_separation() -> None:
+    """After a both-classes epoch with separable scores, the running AUROC is ~1.0."""
+    node = AnomalyAUROCMetrics()
+    s, t, a = _batch(1, 4, 4, score_value=5.0, all_anomaly=True)  # positives, high score
+    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=0))
+    s, t, a = _batch(1, 4, 4, score_value=-5.0, all_anomaly=False)  # negatives, low score
+    out = node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=1))
+    vals = {m.name: m.value for m in out["metrics"]}
+    assert vals["auroc_pixel"] == pytest.approx(1.0, abs=1e-3)
+    assert vals["auroc_image"] == pytest.approx(1.0, abs=1e-3)
+
+
+def test_resets_on_stage_epoch_boundary() -> None:
+    """A new (stage, epoch) restarts accumulation: a fresh epoch seeing only one class
+    yields AUROC 0.0 (undefined), proving prior-epoch state was cleared."""
+    node = AnomalyAUROCMetrics()
+    # Epoch 0 — both classes (perfect separation).
     s, t, a = _batch(1, 4, 4, score_value=5.0, all_anomaly=True)
-    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx())
-    # Frame 1 — all background, low score.
+    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(epoch=0, batch_idx=0))
+    s, t, a = _batch(1, 4, 4, score_value=-5.0, all_anomaly=False)
+    out0 = node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(epoch=0, batch_idx=1))
+    assert {m.name: m.value for m in out0["metrics"]}["auroc_pixel"] == pytest.approx(1.0, abs=1e-3)
+    # Epoch 1 — single all-positive batch. If state carried over, AUROC would be ~1.0;
+    # after reset it sees one class only -> 0.0.
+    s, t, a = _batch(1, 4, 4, score_value=5.0, all_anomaly=True)
+    out1 = node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(epoch=1, batch_idx=0))
+    assert {m.name: m.value for m in out1["metrics"]}["auroc_pixel"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_explicit_reset_clears_state() -> None:
+    node = AnomalyAUROCMetrics()
+    s, t, a = _batch(1, 4, 4, score_value=5.0, all_anomaly=True)
+    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=0))
     s, t, a = _batch(1, 4, 4, score_value=-5.0, all_anomaly=False)
     node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=1))
-    out = node.compute_auroc()
-    assert out["auroc_pixel"] == pytest.approx(1.0, abs=1e-6)
-    assert out["auroc_image"] == pytest.approx(1.0, abs=1e-6)
-
-
-def test_compute_auroc_skipped_when_all_targets_same_class() -> None:
-    node = AnomalyAUROCMetrics()
-    s, t, a = _batch(2, 4, 4, score_value=1.0, all_anomaly=True)
-    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx())
-    out = node.compute_auroc()
-    # Both pixels and images are all-positive → AUROC undefined → key absent.
-    assert "auroc_pixel" not in out
-    assert "auroc_image" not in out
-
-
-def test_compute_auroc_empty_when_no_data() -> None:
-    node = AnomalyAUROCMetrics()
-    assert node.compute_auroc() == {}
-
-
-def test_reset_clears_accumulators() -> None:
-    node = AnomalyAUROCMetrics()
-    s, t, a = _batch(1, 4, 4, score_value=1.0, all_anomaly=True)
-    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx())
-    assert node._pixel_preds  # populated
     node.reset()
-    assert not node._pixel_preds
-    assert not node._pixel_targets
-    assert not node._image_preds
-    assert not node._image_targets
+    # After reset, a single one-class batch -> AUROC 0.0 (undefined), not the prior 1.0.
+    s, t, a = _batch(1, 4, 4, score_value=5.0, all_anomaly=True)
+    out = node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=0))
+    assert {m.name: m.value for m in out["metrics"]}["auroc_pixel"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_streaming_state_is_bounded_no_cpu_concat() -> None:
+    """Regression for the memory fix: state is torchmetrics BinaryAUROC (O(thresholds)),
+    not the old unbounded per-pixel CPU lists."""
+    node = AnomalyAUROCMetrics(thresholds=128)
+    assert isinstance(node.pixel_auroc, BinaryAUROC)
+    assert isinstance(node.image_auroc, BinaryAUROC)
+    assert not hasattr(node, "_pixel_preds")  # the old couple-GB-per-epoch concat is gone
+    # Feeding many large batches must not grow any Python-side buffer.
+    for i in range(8):
+        s, t, a = _batch(1, 64, 64, score_value=float(i), all_anomaly=bool(i % 2))
+        node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=i))
+    # No list attribute should be accumulating tensors.
+    assert not any(isinstance(v, list) and v for v in vars(node).values())
 
 
 def test_stage_filter_val_test_only() -> None:
@@ -75,50 +98,3 @@ def test_stage_filter_val_test_only() -> None:
     assert ExecutionStage.VAL in node.execution_stages
     assert ExecutionStage.TEST in node.execution_stages
     assert ExecutionStage.TRAIN not in node.execution_stages
-
-
-def test_callback_logs_auroc_on_val_epoch_end_with_pl_module_log() -> None:
-    """The callback must (a) reset the node at epoch start and (b) call
-    pl_module.log(<prefix>/auroc_*) on epoch end with the values computed from
-    whatever the node accumulated during forward passes."""
-    node = AnomalyAUROCMetrics()
-    cb = AUROCEpochEndCallback(auroc_node=node, node_log_prefix="metrics_auroc")
-
-    trainer = MagicMock()
-    pl_module = MagicMock()
-
-    # epoch start → reset (no logging)
-    cb.on_validation_epoch_start(trainer, pl_module)
-    assert pl_module.log.call_count == 0
-
-    # Accumulate a perfect-separation epoch.
-    s, t, a = _batch(1, 4, 4, score_value=5.0, all_anomaly=True)
-    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx())
-    s, t, a = _batch(1, 4, 4, score_value=-5.0, all_anomaly=False)
-    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(batch_idx=1))
-
-    cb.on_validation_epoch_end(trainer, pl_module)
-    # Two metrics → two log() calls with prog_bar=True / on_epoch=True.
-    logged_names = {call.args[0] for call in pl_module.log.call_args_list}
-    assert logged_names == {"metrics_auroc/auroc_pixel", "metrics_auroc/auroc_image"}
-    for call in pl_module.log.call_args_list:
-        assert call.kwargs.get("prog_bar") is True
-        assert call.kwargs.get("on_epoch") is True
-        assert call.args[1] == pytest.approx(1.0, abs=1e-6)
-
-
-def test_callback_resets_on_epoch_start_between_epochs() -> None:
-    """Accumulator must be cleared on each new validation epoch."""
-    node = AnomalyAUROCMetrics()
-    cb = AUROCEpochEndCallback(auroc_node=node)
-    trainer = MagicMock()
-    pl_module = MagicMock()
-
-    # Epoch 0 — populate.
-    s, t, a = _batch(2, 4, 4, score_value=1.0, all_anomaly=True)
-    node.forward(scores=s, targets=t, anomaly_score=a, context=_ctx(epoch=0))
-    assert node._pixel_preds
-
-    # Epoch 1 — callback fires epoch_start, accumulator cleared.
-    cb.on_validation_epoch_start(trainer, pl_module)
-    assert not node._pixel_preds
