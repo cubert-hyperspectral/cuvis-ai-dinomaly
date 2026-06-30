@@ -248,7 +248,7 @@ def test_input_channels_6_constructor_inflates_patch_embed(
     patched_dinomaly_6ch: DinomalyDetector,
 ) -> None:
     """After construction, the encoder's patch_embed.proj must have in_channels=6
-    and be a trainable parameter (the inflation contract)."""
+    (the inflation contract) and stay FROZEN — a fixed activation-parity stem."""
     det = patched_dinomaly_6ch
     proj = det.dinomaly_model.encoder.patch_embed.proj
     assert proj.in_channels == 6
@@ -257,10 +257,39 @@ def test_input_channels_6_constructor_inflates_patch_embed(
     # ImageNet stats are tiled to length 6.
     assert len(det.IMAGENET_MEAN) == 6
     assert det.IMAGENET_MEAN[:3] == det.IMAGENET_MEAN[3:]
-    # Patch embed is trainable; rest of encoder is frozen.
-    assert all(p.requires_grad for p in proj.parameters())
-    # The fake encoder has no other parameters, so we just sanity-check the path.
-    # In the real DINOv2 encoder, the transformer blocks would still be frozen.
+    # The inflated patch-embed is a FIXED stem: it stays frozen. anomalib's encoder runs
+    # under torch.no_grad(), so proj never receives a gradient — unfreezing it would be a
+    # no-op (the real-model contract is pinned by the slow test below). Only the
+    # bottleneck + decoder are trainable.
+    assert not any(p.requires_grad for p in proj.parameters())
+    assert any(p.requires_grad for p in det.dinomaly_model.bottleneck.parameters())
+    assert any(p.requires_grad for p in det.dinomaly_model.decoder.parameters())
+
+
+@pytest.mark.slow
+def test_inflated_patch_embed_gets_no_gradient() -> None:
+    """Real-model regression (downloads DINOv2): after a train step the inflated
+    patch-embed receives NO gradient — anomalib runs the encoder under torch.no_grad()
+    and uses its detached features only as reconstruction targets. Pins that the 3->n
+    inflation is a fixed stem, not a fine-tuned layer, so the no-op cannot creep back."""
+    det = DinomalyDetector(
+        encoder_name="dinov2reg_vit_base_14",
+        input_channels=6,
+        image_size=224,
+        crop_size=224,
+        use_center_crop=False,
+    )
+    model = det.dinomaly_model
+    proj = model.encoder.patch_embed.proj
+    x = torch.rand(1, 224, 224, 6)
+    out = det(x, context=Context(stage=ExecutionStage.TRAIN, epoch=0, batch_idx=0, global_step=1))
+    det.zero_grad(set_to_none=True)
+    out["training_loss"].backward()
+    # The whole point: proj gets no gradient even though it is an "unfrozen-able" stem.
+    assert proj.weight.grad is None, "patch_embed.proj unexpectedly received a gradient"
+    # ... while the parts that actually learn do get gradients.
+    assert any(p.grad is not None for p in model.bottleneck.parameters())
+    assert any(p.grad is not None for p in model.decoder.parameters())
 
 
 def test_input_channels_6_forward(patched_dinomaly_6ch: DinomalyDetector) -> None:

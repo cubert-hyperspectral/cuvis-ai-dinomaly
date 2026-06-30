@@ -15,8 +15,11 @@ Why this matters
 
 If we replicate ``x`` into a 6-channel input ``x' = cat([x, x], dim=1)`` and halve
 all weights, the output is identical to the original 3-channel result — proven by the
-``test_activation_parity`` unit test. Once training begins the inflated conv weights
-are unfrozen so the SWIR-slot duplicates can specialise away from the VIS-slot copies.
+``test_activation_parity`` unit test. The inflated conv is then used as a *fixed
+activation-parity stem*: it stays frozen during training because anomalib runs the
+DINOv2 encoder under ``torch.no_grad()``, so ``patch_embed.proj`` never receives a
+gradient (see ``DinomalyDetector._freeze_encoder_unfreeze_head``). The extra bands are
+folded into the embedding through the duplicated VIS weights rather than learned apart.
 
 This module is intentionally dependency-free (only ``torch.nn``) so the math can be
 unit-tested without instantiating anomalib's DinomalyModel or downloading DINOv2 weights.

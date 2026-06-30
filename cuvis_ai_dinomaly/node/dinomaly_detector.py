@@ -34,13 +34,18 @@ class DinomalyDetector(Node):
     Preprocessing matches Anomalib defaults by default: resize, optional center crop,
     ImageNet normalize. For ``input_channels > 3`` the ImageNet mean/std vectors are
     tiled (e.g. ``[R,G,B,R,G,B]`` for 6ch) — a neutral choice that pairs with the
-    duplicate-and-halve inflation; the patch-embed will be fine-tuned from epoch 0.
+    duplicate-and-halve inflation, which is a *fixed activation-parity stem* (see below).
 
     Training
     --------
     - Emits ``training_loss`` (scalar) for :class:`DinomalyTrainLossBridge`.
-    - 3-ch path: only bottleneck and decoder are trainable; DINOv2 encoder stays frozen.
-    - >3-ch path: same as above PLUS the inflated patch-embed conv is trainable.
+    - Only bottleneck and decoder are trainable; the DINOv2 encoder stays frozen.
+    - >3-ch path: same as above. The inflated patch-embed is **not** trainable in
+      practice — anomalib runs the encoder under ``torch.no_grad()`` and uses its
+      detached features only as reconstruction targets, so ``patch_embed.proj`` receives
+      no gradient. The inflation is a fixed stem that folds the extra bands into the
+      embedding via the pretrained VIS weights (pinned by
+      ``test_inflated_patch_embed_gets_no_gradient``).
 
     Inference
     ---------
@@ -304,12 +309,15 @@ class DinomalyDetector(Node):
             p.requires_grad_(True)
         for p in model.decoder.parameters():
             p.requires_grad_(True)
-        # When the patch-embed was inflated, its SWIR-slot weights are duplicates of
-        # the VIS-slot weights — they need to be trainable to differentiate. The rest
-        # of the encoder (transformer blocks) remains frozen.
-        if self.input_channels != 3:
-            for p in model.encoder.patch_embed.proj.parameters():
-                p.requires_grad_(True)
+        # The inflated patch-embed stays FROZEN (covered by the encoder freeze loop
+        # above). anomalib runs the DINOv2 encoder blocks under ``torch.no_grad()``
+        # (torch_model.py) and uses their detached outputs purely as reconstruction
+        # targets, so ``patch_embed.proj`` never receives a gradient regardless of its
+        # ``requires_grad`` flag — unfreezing it would be a no-op (pinned by
+        # ``test_inflated_patch_embed_gets_no_gradient``). The 3->n inflation is therefore
+        # a *fixed activation-parity stem*: the duplicated-and-halved weights fold the
+        # extra (e.g. SWIR) bands into the embedding through the pretrained VIS weights;
+        # only the bottleneck + decoder are trained.
 
     def warmup(self, sample_input: Tensor | None = None) -> None:
         """Pre-compile the model so the first real inference doesn't pay torch.compile cost.
