@@ -30,13 +30,11 @@ from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.training.config import create_callbacks_from_config
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule
+from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import CallbacksConfig, ModelCheckpointConfig, TrainingConfig
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
-
-from cuvis_ai_dinomaly.data import MultiFileNpzDataModule
 
 FROZEN_ADACLIP_CONCRETE_BAND_INDICES: tuple[int, int, int] = (14, 59, 57)
 
@@ -128,7 +126,7 @@ def main(cfg: DictConfig) -> None:
     }
 
     if backend == "npz":
-        datamodule = MultiFileNpzDataModule(
+        datamodule = MultiNpzDataModule(
             **common_loader_kwargs,
             pin_memory=bool(cfg.data.get("pin_memory", True)),
             persistent_workers=bool(cfg.data.get("persistent_workers", True)),
