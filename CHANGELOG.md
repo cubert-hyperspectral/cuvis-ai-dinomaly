@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## 0.4.0 - 2026-07-01
+
+- **Moved the NPZ data layer to cuvis-ai-dataloader.** Deleted `cuvis_ai_dinomaly/data/`
+  (`MultiFileNpzDataset` / `MultiFileNpzDataModule` and the local `_coco_utils` COCO helpers); the
+  generic loader now lives upstream as `cuvis_ai_dataloader.data.MultiNpzDataModule`
+  (`data_module_name: npz_multi`, cuvis-ai-dataloader 0.3.0+). Example scripts and the bedding train
+  notebook import it from there; the batch contract (`cube`, `mask`, `wavelengths`, `mesu_index`) is
+  unchanged. Dropped the never-hit `annotation_json`→mask fallback (masks are baked into the NPZ, so
+  the ecosystem keeps a single COCO source in cuvis-ai-dataloader's `coco_labeler`) and the
+  bedding-only `class_mask` batch key (read by no pipeline node).
+- Added `cuvis-ai-dataloader>=0.3.0` to the `examples` extra and bumped the provisioned
+  `configs/plugins/cuvis_ai_dataloader.yaml` manifest to `v0.3.0` (adds the `npz_multi` capability).
+
 ## 0.3.0 - 2026-06-30
 
 - **N-channel input.** `DinomalyDetector(input_channels=N)` inflates the pretrained DINOv2 patch-embed Conv2d from 3 to N channels by duplicate-and-halve, preserving activation magnitude at init. The inflated stem stays frozen (anomalib runs the encoder under `torch.no_grad()`, so it receives no gradient); only the bottleneck and decoder train. Defaults to 3 for full backward compatibility.

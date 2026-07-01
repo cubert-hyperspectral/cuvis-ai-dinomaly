@@ -68,15 +68,15 @@ dev = [
     "bandit[toml]>=1.7.5",
     "twine>=6.2.0",
 ]
-# The example scripts (examples/) import the high-level `cuvis-ai` node library and
-# load cu3s data through the `cuvis-ai-dataloader` plugin. The data plugin is declared
-# in configs/plugins/cuvis_ai_dataloader.yaml and provisioned into the run env rather
-# than pinned here, so this plugin does not hard-depend on a sibling plugin. cuvis-ai
-# 0.9.0 dropped the cuvis SDK, so the examples pull no SDK. 0.10.0 generalised
-# FixedWavelengthSelector to n channels (cuvis-ai#39), which the 6-band bedding
-# pipeline now uses in place of the old plugin-local selector.
+# The example scripts (examples/) import the high-level `cuvis-ai` node library and the
+# `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.9.0 dropped the cuvis SDK, so the examples
+# pull no SDK; 0.10.0 generalised FixedWavelengthSelector to n channels (cuvis-ai#39), which the
+# 6-band bedding pipeline uses. cuvis-ai-dataloader 0.3.0 carries the `MultiNpzDataModule`
+# (`npz_multi`) the multifile trainers load (base install is SDK-free; the `[cu3s]` extra for
+# cu3s runs is provisioned via configs/plugins/cuvis_ai_dataloader.yaml, not pinned here).
 examples = [
     "cuvis-ai>=0.10.0",
+    "cuvis-ai-dataloader>=0.3.0",
 ]
 
 [project.urls]

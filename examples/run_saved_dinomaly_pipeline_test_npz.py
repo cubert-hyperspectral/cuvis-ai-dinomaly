@@ -40,12 +40,10 @@ import torch
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule
+from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from loguru import logger
-
-from cuvis_ai_dinomaly.data import MultiFileNpzDataModule
 
 
 def _to_numpy(x: torch.Tensor | None) -> np.ndarray | None:
@@ -243,7 +241,7 @@ def main() -> None:
         "num_workers": args.num_workers,
     }
     if backend == "npz":
-        datamodule = MultiFileNpzDataModule(
+        datamodule = MultiNpzDataModule(
             **common,
             pin_memory=device.type == "cuda",
             persistent_workers=False,

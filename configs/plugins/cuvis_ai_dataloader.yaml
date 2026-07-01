@@ -1,4 +1,4 @@
-# cuvis-ai-dataloader plugin manifest (data modules: cu3s / cu3s_multi / tiff_paired).
+# cuvis-ai-dataloader plugin manifest (data modules: cu3s / cu3s_multi / npz_multi / tiff_paired).
 # The example scripts select cu3s data; provisioning this manifest installs the package
 # (with its `[cu3s, coco]` extras, which pull the cuvis SDK) into the run env, so
 # cuvis-ai-dataloader is NOT a dependency of this plugin's pyproject. Provision it before
@@ -8,9 +8,10 @@
 name: cuvis_ai_dataloader
 # path: "../../../cuvis-ai-dataloader/cuvis-ai-dataloader"
 repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dataloader.git"
-tag: "v0.2.0"
+tag: "v0.3.0"
 package_name: cuvis-ai-dataloader
 capabilities:
   - { class_name: cuvis_ai_dataloader.data.datamodule_cu3s.Cu3sDataModule,              kind: data_module, data_module_name: cu3s,        extras: [cu3s, coco] }
   - { class_name: cuvis_ai_dataloader.data.datamodule_cu3s_multi.MultiCu3sDataModule,   kind: data_module, data_module_name: cu3s_multi,  extras: [cu3s, coco] }
+  - { class_name: cuvis_ai_dataloader.data.datamodule_npz_multi.MultiNpzDataModule,     kind: data_module, data_module_name: npz_multi,   extras: [] }
   - { class_name: cuvis_ai_dataloader.data.datamodule_tiff_paired.TiffPairedDataModule, kind: data_module, data_module_name: tiff_paired, extras: [tiff] }

@@ -34,15 +34,13 @@ from cuvis_ai.node.normalization import MinMaxNormalizer
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule
+from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import TrainingConfig
 from loguru import logger
 from omegaconf import OmegaConf
-
-from cuvis_ai_dinomaly.data import MultiFileNpzDataModule
 
 
 def _batch_to_device(batch: dict, device: torch.device) -> dict:
@@ -87,7 +85,7 @@ def build_pipeline_and_datamodule(
         "num_workers": 0,
     }
     if backend == "npz":
-        datamodule = MultiFileNpzDataModule(
+        datamodule = MultiNpzDataModule(
             **common_loader_kwargs,
             pin_memory=bool(cfg.data.get("pin_memory", True)),
             persistent_workers=False,
