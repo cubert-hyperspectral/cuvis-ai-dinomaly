@@ -257,7 +257,15 @@ def main() -> None:
         raise RuntimeError("No test split in splits CSV (or test_ds empty).")
 
     loader = datamodule.test_dataloader()
-    records = datamodule.test_ds.records
+    # Upstream MultiNpzDataModule exposes per-frame rows as `_rows` (this script predates the
+    # move and used the local datamodule's `.records`); support both.
+    records = getattr(datamodule.test_ds, "records", None)
+    if records is None:
+        records = getattr(datamodule.test_ds, "_rows", None)
+    if records is None:
+        raise RuntimeError(
+            f"{type(datamodule.test_ds).__name__} exposes neither .records nor ._rows"
+        )
     manifest_path = out_dir / "manifest.jsonl"
 
     n_test = len(datamodule.test_ds)
