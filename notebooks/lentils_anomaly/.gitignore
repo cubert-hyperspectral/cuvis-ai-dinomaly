@@ -1,0 +1,5 @@
+outputs/
+splits_smoke.csv
+npz/
+.ipynb_checkpoints/
+__pycache__/

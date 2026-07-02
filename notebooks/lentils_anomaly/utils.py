@@ -57,11 +57,12 @@ LOCAL_SPLITS_CSV = Path(
 #: Where HF cu3s are downloaded + converted to NPZ (hf mode).
 LENTILS_NPZ_OUT = LENTILS_HF_CACHE / "npz"
 
-#: Trained-pipeline dir written by the train notebooks (inference notebook reads it).
+#: Trained-pipeline dir the inference notebook reads. Defaults to the RGB train notebook's
+#: output; set ``LENTILS_PIPELINE_DIR`` to evaluate a CIR / concrete run instead.
 LOCAL_PIPELINE_DIR = Path(
     os.environ.get(
         "LENTILS_PIPELINE_DIR",
-        str(REPO_ROOT / "notebooks" / "lentils_anomaly" / "outputs" / "trained_run" / "trained_models"),
+        str(REPO_ROOT / "notebooks" / "lentils_anomaly" / "outputs" / "lentils_rgb_run" / "trained_models"),
     )
 )
 
@@ -101,6 +102,27 @@ def resolve_config() -> dict[str, Any]:
             f"Set LENTILS_DATA_SOURCE='hf' to download + convert from HuggingFace."
         )
     return cfg
+
+
+def resolve_pipeline() -> tuple[Path, Path]:
+    """Return ``(yaml_path, pt_path)`` for a trained lentils pipeline (local).
+
+    Picks the single ``*.yaml`` in :data:`LOCAL_PIPELINE_DIR` (a train notebook's
+    ``trained_models`` dir) + its sibling ``.pt``. Set ``LENTILS_PIPELINE_DIR`` to choose a
+    specific run (RGB / CIR / concrete).
+    """
+    d = LOCAL_PIPELINE_DIR
+    yamls = sorted(d.glob("*.yaml"))
+    if not yamls:
+        raise FileNotFoundError(
+            f"No trained pipeline *.yaml in {d}. Run a train notebook first, or set "
+            f"LENTILS_PIPELINE_DIR to a trained_models dir."
+        )
+    yaml_path = yamls[0]
+    pt_path = yaml_path.with_suffix(".pt")
+    if not pt_path.is_file():
+        raise FileNotFoundError(f"Missing weights next to {yaml_path.name}: {pt_path}")
+    return yaml_path, pt_path
 
 
 # --------------------------------------------------------------------------- selectors
@@ -145,6 +167,59 @@ def resolve_splits_csv() -> Path:
     return Path(
         hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename="splits_dinomaly.csv",
                         cache_dir=str(LENTILS_HF_CACHE))
+    )
+
+
+def subsample_splits_csv(csv_path: str | Path, n_per_split: int, out_path: str | Path) -> Path:
+    """Write a splits CSV keeping at most ``n_per_split`` rows per split (fast dry-runs).
+
+    Rows whose ``split`` is not one of train/val/test are dropped (e.g. ``adaclip_train``,
+    which the datamodule ignores anyway). Returns ``out_path``.
+    """
+    import csv as _csv
+    from collections import defaultdict
+
+    with open(csv_path, newline="") as f:
+        rows = list(_csv.DictReader(f))
+    if not rows:
+        raise ValueError(f"empty splits CSV: {csv_path}")
+    fields = list(rows[0].keys())
+    kept: list[dict[str, str]] = []
+    seen: dict[str, int] = defaultdict(int)
+    for r in rows:
+        s = r.get("split", "")
+        if s not in ("train", "val", "test"):
+            continue
+        if seen[s] < n_per_split:
+            kept.append(r)
+            seen[s] += 1
+    with open(out_path, "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(kept)
+    return Path(out_path)
+
+
+def ensure_lentils_npz(out_dir: str | Path, *, limit: int = 0) -> Path:
+    """HF-download the lentils cu3s + convert to per-frame NPZ, returning a splits CSV.
+
+    .. warning::
+       Blocked on a converter enhancement. The lentils cu3s are **long merged recordings**
+       whose annotated frames are sparse: ``camera_frame_num`` (the frame index inside the
+       cu3s) is NOT equal to ``global_image_id`` (the per-day COCO image id). But
+       ``cu3s-to-npz`` currently reads frame ``i`` *and* looks up its mask via
+       ``CocoLabeler.load_for(i, ...)`` with the same ``i`` — i.e. it assumes
+       ``frame_index == coco_image_id``. For lentils that mismatch would bake the wrong
+       (all-zero) masks. The converter needs an explicit ``frame_index → image_id`` mapping
+       first (planned on the cuvis-ai-dataloader ALL-5852 PR). Until then use
+       ``LENTILS_DATA_SOURCE=local`` (the on-server NPZ already carry correct baked masks,
+       verified 180/180 vs the GT COCO).
+    """
+    raise NotImplementedError(
+        "HF download→convert is blocked on a converter fix: lentils merged cu3s have "
+        "camera_frame_num != global_image_id, but cu3s-to-npz assumes frame_index == "
+        "coco_image_id (see ensure_lentils_npz docstring). Set LENTILS_DATA_SOURCE=local — "
+        "the on-server NPZ carry correct baked masks."
     )
 
 
@@ -224,6 +299,99 @@ def per_class_pixel_auroc(scores: list[np.ndarray], class_masks: list[np.ndarray
         # one-vs-background: positives = this class, negatives = background (exclude other classes)
         keep = cls_pixels | (cm == 0)
         out[cname] = float(roc_auc_score(cls_pixels[keep].astype(int), y_s[keep]))
+    return out
+
+
+def run_test_inference(pipeline: Any, datamodule: Any, *, device: Any, limit: int = 0) -> list[dict[str, Any]]:
+    """Run a loaded pipeline over the ``test`` split; return one result dict per frame.
+
+    Each dict: ``score_map`` [H,W] f32, ``anomaly_score`` float|None, ``mask`` [H,W] i32,
+    ``class_mask`` [H,W] u8, ``rgb`` [H,W,3] f32|None. Reuses the extraction helpers from
+    ``examples/run_saved_dinomaly_pipeline_test_npz.py`` so the notebook path matches the CLI.
+    The DINOv2 encoder runs under ``torch.no_grad()``.
+    """
+    import sys as _sys
+
+    import torch as _torch
+    from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
+    from cuvis_ai_schemas.enums import ExecutionStage
+    from cuvis_ai_schemas.execution import Context
+
+    _ex = str(REPO_ROOT / "examples")
+    if _ex not in _sys.path:
+        _sys.path.insert(0, _ex)
+    from run_saved_dinomaly_pipeline_test_npz import (
+        _move_batch,
+        _pick_dinomaly_outputs,
+        _pick_selector_outputs,
+        _sample_np,
+    )
+
+    loader = datamodule.test_dataloader()
+    records = getattr(datamodule.test_ds, "records", None)
+    if records is None:
+        records = getattr(datamodule.test_ds, "_rows", None)
+    results: list[dict[str, Any]] = []
+    offset = 0
+    for bidx, batch in enumerate(loader):
+        if limit and offset >= limit:
+            break
+        batch = _move_batch(batch, device)
+        bsz = int(batch["cube"].shape[0])
+        ctx = Context(stage=ExecutionStage.TEST, epoch=0, batch_idx=bidx, global_step=offset)
+        with _torch.no_grad():
+            raw = pipeline.forward(batch=batch, context=ctx)
+        node_out = restructure_output_to_node_dict(raw)
+        dino = _pick_dinomaly_outputs(node_out)
+        sel = _pick_selector_outputs(node_out)
+        for i in range(bsz):
+            if limit and offset + i >= limit:
+                break
+            score = _sample_np(dino.get("scores"), i, expected_batch_size=bsz)
+            if score is not None and score.ndim == 3 and score.shape[-1] == 1:
+                score = score[..., 0]
+            ascore = _sample_np(dino.get("anomaly_score"), i, expected_batch_size=bsz)
+            mask = _sample_np(batch.get("mask"), i, expected_batch_size=bsz)
+            cmask = _sample_np(batch.get("class_mask"), i, expected_batch_size=bsz)
+            rgb = _sample_np(sel.get("rgb_image"), i, expected_batch_size=bsz)
+            rec = records[offset + i] if records is not None and offset + i < len(records) else {}
+            results.append({
+                "score_map": None if score is None else np.asarray(score, np.float32),
+                "anomaly_score": None if ascore is None else float(np.asarray(ascore).ravel()[0]),
+                "mask": None if mask is None else np.asarray(mask, np.int32),
+                "class_mask": None if cmask is None else np.asarray(cmask, np.uint8),
+                "rgb": None if rgb is None else np.asarray(rgb, np.float32),
+                "npz_path": rec.get("npz_path") if isinstance(rec, dict) else None,
+                "image_id": rec.get("image_id") if isinstance(rec, dict) else None,
+            })
+        offset += bsz
+    return results
+
+
+def overall_auroc(results: list[dict[str, Any]]) -> dict[str, float]:
+    """Overall pixel + image AUROC over inference results (binary anomaly = ``mask != 0``)."""
+    from sklearn.metrics import roc_auc_score
+
+    px_s, px_y, img_s, img_y = [], [], [], []
+    for r in results:
+        if r.get("score_map") is None or r.get("mask") is None:
+            continue
+        px_s.append(_norm(r["score_map"]).ravel())
+        px_y.append((r["mask"].ravel() != 0).astype(int))
+        img_y.append(int((r["mask"] != 0).any()))
+        img_s.append(
+            float(r["anomaly_score"]) if r.get("anomaly_score") is not None
+            else float(np.asarray(r["score_map"]).max())
+        )
+    out: dict[str, float] = {}
+    if px_y:
+        py, ps = np.concatenate(px_y), np.concatenate(px_s)
+        if 0 < int(py.sum()) < py.size:
+            out["pixel_auroc"] = float(roc_auc_score(py, ps))
+    if img_y:
+        iy = np.asarray(img_y)
+        if 0 < int(iy.sum()) < iy.size:
+            out["image_auroc"] = float(roc_auc_score(iy, np.asarray(img_s)))
     return out
 
 
