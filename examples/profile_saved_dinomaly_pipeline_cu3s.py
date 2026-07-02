@@ -118,7 +118,15 @@ def main() -> None:
         )
 
     loader = datamodule.test_dataloader()
-    records = datamodule.test_ds.records
+    # Upstream cuvis-ai-dataloader datasets expose per-frame rows as `_rows` (this script
+    # predates the move and used the local datamodule's `.records`); support both.
+    records = getattr(datamodule.test_ds, "records", None)
+    if records is None:
+        records = getattr(datamodule.test_ds, "_rows", None)
+    if records is None:
+        raise RuntimeError(
+            f"{type(datamodule.test_ds).__name__} exposes neither .records nor ._rows"
+        )
 
     pipeline.set_profiling(
         enabled=True,
