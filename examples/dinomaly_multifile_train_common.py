@@ -156,7 +156,7 @@ def run_dinomaly_multifile_training(
             target_wavelengths=(650.0, 550.0, 450.0),
             name="rgb_selector",
         )
-    else:
+    elif band_mode == "cir":
         selector = CIRSelector(
             nir_nm=860.0,
             red_nm=670.0,
@@ -165,6 +165,15 @@ def run_dinomaly_multifile_training(
             running_warmup_frames=0,
             freeze_running_bounds_after_frames=20,
             name="cir_selector",
+        )
+    else:
+        # Fail loudly instead of silently building a CIR selector. This shared trainer only
+        # wires the fixed RGB / CIR selectors; the learnable Concrete selector needs a different
+        # graph (extra selection_weights -> distinctness-loss edge, two loss nodes), so it lives
+        # in the standalone examples/train_dinomaly_concrete_joint_multifile.py.
+        raise ValueError(
+            f"band_mode must be 'rgb' or 'cir', got {band_mode!r}. For the Concrete band "
+            f"selector use examples/train_dinomaly_concrete_joint_multifile.py."
         )
     selector._requires_initial_fit_override = False
 
