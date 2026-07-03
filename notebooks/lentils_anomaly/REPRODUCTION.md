@@ -57,7 +57,7 @@ category `class_mask [H,W]` (normal frames have no mask key; the loader emits ze
   camera counter, *not* the cu3s index). Verified end-to-end on a subset: normal frames → empty
   mask, annotated frames → baked class ids matching the GT `category_labels`.
   - **Extra deps:** this path reads cu3s, so it needs the cu3s reader stack — `cuvis` SDK +
-    `dataclass_wizard` (`uv pip install 'cuvis-ai-dataloader[cu3s]'`). The `local` path doesn't.
+    `dataclass_wizard` (`uv pip install 'cuvis-ai-dataloader[cu3s,coco]'`). The `local` path doesn't.
   - **Note:** the cuvis SDK may abort the *process* on session teardown (after all files are
     written) — harmless for a convert-then-train workflow (convert is its own step), but keep the
     convert separate from the training process.
@@ -69,7 +69,7 @@ repo's `examples/plugins.yaml`). All knobs are env-overridable:
 
 | env var | default | meaning |
 |---|---|---|
-| `LENTILS_DATA_SOURCE` | `local` | `local` NPZ, or `hf` (download→convert; needs `cuvis-ai-dataloader[cu3s]`) |
+| `LENTILS_DATA_SOURCE` | `local` | `local` NPZ, or `hf` (download→convert; needs `cuvis-ai-dataloader[cu3s,coco]`) |
 | `LENTILS_MAX_EPOCHS` | `1` | bump to `50` for a full run |
 | `LENTILS_IMAGE_SIZE` | `448` | square side, multiple of 14 |
 | `LENTILS_SMOKE_LIMIT` | `0` | `0` = all frames; `N` = N per split (fast dry-run) |

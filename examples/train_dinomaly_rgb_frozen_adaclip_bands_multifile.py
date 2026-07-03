@@ -183,11 +183,14 @@ def main(cfg: DictConfig) -> None:
         (metrics_node.metrics, tb.metrics),
     )
 
-    pipeline.visualize(
-        format="render_graphviz",
-        output_path=str(output_dir / "pipeline" / f"{pipeline.name}.png"),
-        show_execution_stage=True,
-    )
+    try:
+        pipeline.visualize(
+            format="render_graphviz",
+            output_path=str(output_dir / "pipeline" / f"{pipeline.name}.png"),
+            show_execution_stage=True,
+        )
+    except Exception as exc:  # graphviz 'dot' not installed etc. — the pipeline PNG is optional.
+        logger.warning("Skipping pipeline visualization ({}); install graphviz for the diagram.", exc)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Moving pipeline to device: {}", device)
