@@ -3,11 +3,12 @@
 Four notebooks ride on these helpers, all on the current **`dinomaly`** plugin
 (`cuvis_ai_dinomaly` / `DinomalyDetector`) — never the defunct `dinomaly2`:
 
-- ``lentils_rgb_train_tutorial.ipynb``      — train with the RGB fixed-wavelength selector
-- ``lentils_cir_train_tutorial.ipynb``      — train with the CIR (NIR/Red/Green) selector
-- ``lentils_concrete_train_tutorial.ipynb`` — train with the concrete band selector
-- ``lentils_inference_tutorial.ipynb``      — load a trained pipeline, eval on the 180 test,
-                                              per-class AUROC breakdown
+- ``lentils_rgb_train_tutorial.ipynb``          — train with the RGB fixed-wavelength selector
+- ``lentils_cir_train_tutorial.ipynb``          — train with the CIR (NIR/Red/Green) selector
+- ``lentils_adaclip_bands_train_tutorial.ipynb``— train with the 3 bands AdaCLIP's frozen concrete
+                                                  selector converged to (indices 14/59/57), fixed
+- ``lentils_inference_tutorial.ipynb``          — load a trained pipeline, eval on the 180 test,
+                                                  per-class AUROC breakdown
 
 Lentils dataset
 ---------------
@@ -77,8 +78,14 @@ SELECTOR_SPECS: dict[str, dict[str, Any]] = {
     "rgb": {"label": "RGB (650/550/450 nm fixed)", "wavelengths": (650.0, 550.0, 450.0)},
     "cir": {"label": "CIR (NIR 860 / Red 670 / Green 560 nm)",
             "nir_nm": 860.0, "red_nm": 670.0, "green_nm": 560.0},
-    "concrete": {"label": "Concrete (learnable band selector)", "output_channels": 3},
+    "adaclip": {"label": "AdaCLIP frozen bands (cube indices 14/59/57)",
+                "band_indices": (14, 59, 57)},
 }
+
+#: The three cube-channel indices AdaCLIP's frozen concrete selector converged to on lentils.
+#: Resolved to wavelengths per-dataset by :func:`resolve_adaclip_wavelengths` (typically
+#: ~(542, 902, 886) nm on the 61-band lentils data), then fed to a FixedWavelengthSelector.
+ADACLIP_BAND_INDICES: tuple[int, int, int] = (14, 59, 57)
 
 
 def resolve_config() -> dict[str, Any]:
@@ -147,11 +154,40 @@ def build_selector(mode: str, *, name: str = "selector") -> Any:
         )
     else:
         raise NotImplementedError(
-            f"selector mode {mode!r} not wired in this helper; use 'rgb' or 'cir', "
-            f"or the concrete training notebook."
+            f"selector mode {mode!r} not wired in this helper; use 'rgb' or 'cir'. For the "
+            f"AdaCLIP bands, resolve_adaclip_wavelengths(...) + FixedWavelengthSelector (see the "
+            f"adaclip_bands train notebook)."
         )
     sel._requires_initial_fit_override = False
     return sel
+
+
+def resolve_adaclip_wavelengths(
+    splits_csv: str | Path, indices: tuple[int, int, int] = ADACLIP_BAND_INDICES
+) -> tuple[float, float, float]:
+    """Map AdaCLIP's frozen band ``indices`` to wavelengths (nm) using the first train NPZ.
+
+    Mirrors ``examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py``: reads the
+    ``wavelengths`` array of the first ``split == train`` row (or the first row with an
+    ``npz_path``) and returns ``(w[i0], w[i1], w[i2])`` in R,G,B order.
+    """
+    import csv as _csv
+
+    with open(splits_csv, newline="") as f:
+        rows = list(_csv.DictReader(f))
+    train_rows = [r for r in rows if r.get("split") == "train" and (r.get("npz_path") or "").strip()]
+    if not train_rows:
+        train_rows = [r for r in rows if (r.get("npz_path") or "").strip()]
+    if not train_rows:
+        raise ValueError(f"No rows with npz_path in {splits_csv}")
+    with np.load(train_rows[0]["npz_path"]) as z:
+        if "wavelengths" not in z.files:
+            raise KeyError(f"{train_rows[0]['npz_path']} has no 'wavelengths'")
+        w = np.asarray(z["wavelengths"], dtype=np.float64).ravel()
+    for i in indices:
+        if not (0 <= i < len(w)):
+            raise IndexError(f"band index {i} out of range for {len(w)} bands")
+    return (float(w[indices[0]]), float(w[indices[1]]), float(w[indices[2]]))
 
 
 # --------------------------------------------------------------------------- data

@@ -1,7 +1,7 @@
 # Lentils × Dinomaly — reproduction guide
 
 How to reproduce the lentils foreign-object anomaly-detection experiments on the **current**
-cuvis-ai stack, with three spectral front-ends (RGB / CIR / Concrete) plus an inference +
+cuvis-ai stack, with three spectral front-ends (RGB / CIR / AdaCLIP-bands) plus an inference +
 per-class-AUROC walkthrough.
 
 > **Use `dinomaly`, not `dinomaly2`.** Everything here uses the current
@@ -75,9 +75,10 @@ repo's `examples/plugins.yaml`). All knobs are env-overridable:
 
 - `lentils_rgb_train_tutorial.ipynb` — fixed-wavelength RGB selector (650 / 550 / 450 nm).
 - `lentils_cir_train_tutorial.ipynb` — CIR selector (NIR 860 / Red 670 / Green 560 nm).
-- `lentils_concrete_train_tutorial.ipynb` — learnable `ConcreteChannelMixer` (61 → 3), trained
-  jointly with Dinomaly under a distinctness regulariser. **Note:** the `tau` anneal schedule is
-  tied to `MAX_EPOCHS`, so a 1-epoch smoke keeps the selector soft — use the full run.
+- `lentils_adaclip_bands_train_tutorial.ipynb` — the 3 bands AdaCLIP's frozen concrete selector
+  converged to (cube indices 14/59/57), resolved to wavelengths from the data (≈542/902/886 nm) and
+  used as a **fixed** `FixedWavelengthSelector`. Head-to-head-with-AdaCLIP variant (same bands, but
+  reconstructed by Dinomaly). A fully *learnable* concrete selector is the standalone script below.
 - `lentils_inference_tutorial.ipynb` — load a trained pipeline, evaluate on the 180-frame test,
   report overall pixel + image AUROC and a **per-class pixel AUROC** breakdown (from `class_mask`).
 
@@ -101,7 +102,10 @@ uv run python examples/train_dinomaly_rgb_multifile.py \
 # CIR (NIR / Red / Green) — same, via:
 uv run python examples/train_dinomaly_cir_multifile.py  <same overrides>
 
-# Concrete (learnable band selector, joint + distinctness) — STANDALONE script:
+# AdaCLIP frozen bands (fixed selector on indices 14/59/57) — STANDALONE script:
+uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py <same overrides>
+
+# Concrete (LEARNABLE band selector, joint + distinctness) — STANDALONE script:
 uv run python examples/train_dinomaly_concrete_joint_multifile.py <same overrides>
 ```
 
