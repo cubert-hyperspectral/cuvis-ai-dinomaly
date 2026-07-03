@@ -42,7 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
 
 LENTILS_HF_REPO_ID = "cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils"
-LENTILS_HF_CACHE = Path.home() / ".cache" / "cuvis_lentils"
+LENTILS_HF_CACHE = Path(os.environ.get("LENTILS_HF_CACHE", str(Path.home() / ".cache" / "cuvis_lentils")))
 
 #: "local" (default on asai2) reads the existing /mnt/data NPZ + the local split CSV;
 #: "hf" downloads cu3s from HF and converts to NPZ. Env-overridable.
@@ -63,7 +63,7 @@ LENTILS_NPZ_OUT = LENTILS_HF_CACHE / "npz"
 LOCAL_PIPELINE_DIR = Path(
     os.environ.get(
         "LENTILS_PIPELINE_DIR",
-        str(REPO_ROOT / "notebooks" / "lentils_anomaly" / "outputs" / "lentils_rgb_run" / "trained_models"),
+        str(REPO_ROOT / "notebooks" / "lentils_anomaly" / "outputs" / "lentils_adaclip_run" / "trained_models"),
     )
 )
 
@@ -236,27 +236,78 @@ def subsample_splits_csv(csv_path: str | Path, n_per_split: int, out_path: str |
     return Path(out_path)
 
 
-def ensure_lentils_npz(out_dir: str | Path, *, limit: int = 0) -> Path:
-    """HF-download the lentils cu3s + convert to per-frame NPZ, returning a splits CSV.
+def ensure_lentils_npz(
+    out_dir: str | Path, *, limit: int = 0, splits_csv: str | Path | None = None
+) -> Path:
+    """Download the lentils cu3s + per-session COCO from HF, convert to per-frame NPZ.
 
-    .. warning::
-       Blocked on a converter enhancement. The lentils cu3s are **long merged recordings**
-       whose annotated frames are sparse: ``camera_frame_num`` (the frame index inside the
-       cu3s) is NOT equal to ``global_image_id`` (the per-day COCO image id). But
-       ``cu3s-to-npz`` currently reads frame ``i`` *and* looks up its mask via
-       ``CocoLabeler.load_for(i, ...)`` with the same ``i`` — i.e. it assumes
-       ``frame_index == coco_image_id``. For lentils that mismatch would bake the wrong
-       (all-zero) masks. The converter needs an explicit ``frame_index → image_id`` mapping
-       first (planned on the cuvis-ai-dataloader ALL-5852 PR). Until then use
-       ``LENTILS_DATA_SOURCE=local`` (the on-server NPZ already carry correct baked masks,
-       verified 180/180 vs the GT COCO).
+    Returns a splits CSV ``(split, npz_path, image_id)`` that ``MultiNpzDataModule`` reads.
+
+    Each per-session ``.cu3s`` is indexed by its **measurement index = ``local_image_id``**
+    (0..N-1), which is also the ``image_id`` in that session's sibling COCO (``json_path``). So we
+    read + label frames by ``local_image_id`` (``frame_index == image_id`` — no decoupling needed;
+    ``camera_frame_num`` is the original camera counter, not the cu3s index). Each cu3s is
+    downloaded once and its needed frames converted together.
+
+    Parameters
+    ----------
+    limit
+        If > 0, keep at most this many frames per split (fast dry-run).
+    splits_csv
+        Use this pre-filtered splits CSV instead of downloading the HF ``splits_dinomaly.csv``
+        (must carry ``cu3s_path, json_path, camera_frame_num, local_image_id, split``).
     """
-    raise NotImplementedError(
-        "HF download→convert is blocked on a converter fix: lentils merged cu3s have "
-        "camera_frame_num != global_image_id, but cu3s-to-npz assumes frame_index == "
-        "coco_image_id (see ensure_lentils_npz docstring). Set LENTILS_DATA_SOURCE=local — "
-        "the on-server NPZ carry correct baked masks."
-    )
+    import csv as _csv
+    from collections import OrderedDict, defaultdict
+
+    from cuvis_ai_dataloader.data.npz_converter import convert_cu3s_file
+    from huggingface_hub import hf_hub_download
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cache = str(LENTILS_HF_CACHE)
+
+    if splits_csv is None:
+        splits_csv = hf_hub_download(
+            LENTILS_HF_REPO_ID, repo_type="dataset", filename="splits_dinomaly.csv", cache_dir=cache
+        )
+    with open(splits_csv, newline="") as f:
+        rows = [r for r in _csv.DictReader(f) if r.get("split") in ("train", "val", "test")]
+
+    if limit:
+        seen: dict[str, int] = defaultdict(int)
+        kept = []
+        for r in rows:
+            s = r["split"]
+            if seen[s] < limit:
+                kept.append(r)
+                seen[s] += 1
+        rows = kept
+
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for r in rows:
+        groups.setdefault(r["cu3s_path"], []).append(r)
+
+    out_rows: list[dict[str, Any]] = []
+    for cu3s_rel, grp in groups.items():
+        json_rel = grp[0]["json_path"]
+        cu3s = hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=cu3s_rel, cache_dir=cache)
+        coco = hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=json_rel, cache_dir=cache)
+        recs = convert_cu3s_file(
+            cu3s,
+            out_dir,
+            annotation_json=coco,
+            frame_indices=[int(r["local_image_id"]) for r in grp],
+        )
+        for r, rec in zip(grp, recs, strict=True):
+            out_rows.append({"split": r["split"], "npz_path": rec["npz_path"], "image_id": rec["image_id"]})
+
+    csv_out = out_dir / "lentils_splits_npz_fromhf.csv"
+    with open(csv_out, "w", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=["split", "npz_path", "image_id"])
+        w.writeheader()
+        w.writerows(out_rows)
+    return csv_out
 
 
 def load_lentils_frame(npz_path: str | Path) -> dict[str, np.ndarray]:

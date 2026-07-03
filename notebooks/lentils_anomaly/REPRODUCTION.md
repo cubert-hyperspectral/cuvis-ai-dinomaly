@@ -50,14 +50,17 @@ category `class_mask [H,W]` (normal frames have no mask key; the loader emits ze
   (validated 180/180 byte-for-byte against the GT COCO). The train/inference notebooks read them
   via the local split CSV (`diagnostics/lentils_splits_npz_dinomaly.csv`). Set
   `LENTILS_DATA_SOURCE=local` (the default).
-- **`hf` (download → convert) — currently blocked.** The lentils cu3s are long *merged*
-  recordings whose annotated frames are sparse: `camera_frame_num` (frame index in the cu3s) ≠
-  `global_image_id` (per-day COCO image id). The generalized `cu3s-to-npz` converter currently
-  reads frame `i` *and* looks up its mask via `CocoLabeler.load_for(i, …)` with the same `i`, i.e.
-  it assumes `frame_index == coco_image_id`. For lentils that would bake wrong masks, so the
-  notebook's `hf` branch raises with this explanation. **Fix needed:** an explicit
-  `frame_index → image_id` mapping in the converter (planned on the cuvis-ai-dataloader
-  ALL-5852 PR). Until then, use `local`.
+- **`hf` (download → convert) — verified.** `ensure_lentils_npz()` downloads the cu3s + their
+  per-session COCO (`json_path`) from HF and converts to NPZ. Each per-session cu3s is indexed by
+  its **measurement index = `local_image_id`**, which is also the `image_id` in that session's
+  COCO — so frames are read + labelled by `local_image_id` (`camera_frame_num` is the original
+  camera counter, *not* the cu3s index). Verified end-to-end on a subset: normal frames → empty
+  mask, annotated frames → baked class ids matching the GT `category_labels`.
+  - **Extra deps:** this path reads cu3s, so it needs the cu3s reader stack — `cuvis` SDK +
+    `dataclass_wizard` (`uv pip install 'cuvis-ai-dataloader[cu3s]'`). The `local` path doesn't.
+  - **Note:** the cuvis SDK may abort the *process* on session teardown (after all files are
+    written) — harmless for a convert-then-train workflow (convert is its own step), but keep the
+    convert separate from the training process.
 
 ## Notebooks (pedagogical)
 
@@ -66,7 +69,7 @@ repo's `examples/plugins.yaml`). All knobs are env-overridable:
 
 | env var | default | meaning |
 |---|---|---|
-| `LENTILS_DATA_SOURCE` | `local` | `local` NPZ, or `hf` (blocked, see above) |
+| `LENTILS_DATA_SOURCE` | `local` | `local` NPZ, or `hf` (download→convert; needs `cuvis-ai-dataloader[cu3s]`) |
 | `LENTILS_MAX_EPOCHS` | `1` | bump to `50` for a full run |
 | `LENTILS_IMAGE_SIZE` | `448` | square side, multiple of 14 |
 | `LENTILS_SMOKE_LIMIT` | `0` | `0` = all frames; `N` = N per split (fast dry-run) |
