@@ -95,12 +95,12 @@ The Hydra scripts in `examples/` are the canonical path for the definitive 50-ep
 auto-detected: a `npz_path` column → `MultiNpzDataModule`, else `MultiCu3sDataModule`.
 
 ```bash
-# RGB (fixed wavelengths)
+# RGB (fixed wavelengths). <SPLITS> = your (split, npz_path, image_id) CSV; <OUT> = output dir.
 uv run python examples/train_dinomaly_rgb_multifile.py \
-  output_dir=/mnt/data/cuvis_ai_outputs/dinomaly_rgb_npz_50ep \
+  output_dir=<OUT>/dinomaly_rgb_50ep \
   training.trainer.max_epochs=50 \
-  data.splits_csv=/home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_dinomaly.csv \
-  data.num_workers=0 data.persistent_workers=false eval_mode=best
+  data.splits_csv=<SPLITS> \
+  data.num_workers=6 data.persistent_workers=true eval_mode=best
 
 # CIR (NIR / Red / Green) — same, via:
 uv run python examples/train_dinomaly_cir_multifile.py  <same overrides>
@@ -125,7 +125,7 @@ uv run python examples/train_dinomaly_concrete_joint_multifile.py <same override
 uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
   --pipeline-yaml <run>/trained_models/<name>.yaml \
   --pipeline-pt   <run>/trained_models/<name>.pt \
-  --splits-csv    /home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_dinomaly.csv \
+  --splits-csv    <SPLITS> \
   --output-dir    <run>/eval_test
 ```
 

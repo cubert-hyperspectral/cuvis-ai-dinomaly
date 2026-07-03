@@ -17,15 +17,15 @@ Lentils dataset
 per-day global COCO). The Dinomaly split (train-on-normals) is the HF ``splits_dinomaly.csv``:
 train 308 (normal) / val 148 / test 180 / adaclip_train 500 (held out).
 
-Workflow (per Nima)
--------------------
+Workflow
+--------
 1. Download cu3s from HF (``huggingface-cli download`` / ``snapshot_download``).
 2. Convert to per-frame NPZ with baked ``mask`` + ``class_mask`` via cuvis-ai-dataloader's
-   ``cu3s-to-npz`` (never store NPZ on HF).
+   ``cu3s-to-npz`` (NPZ are never stored on HF).
 3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``).
 
-``LENTILS_DATA_SOURCE=local`` (env var, the default here on the dev server) uses the existing
-``/mnt/data`` NPZ + the local split CSV; ``=hf`` drives the download→convert path.
+``LENTILS_DATA_SOURCE`` selects the data path: ``hf`` (default) downloads + converts on demand;
+``local`` reads pre-existing NPZ from the CSV in ``LENTILS_SPLITS_CSV``.
 """
 
 from __future__ import annotations
@@ -44,22 +44,18 @@ DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
 LENTILS_HF_REPO_ID = "cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils"
 LENTILS_HF_CACHE = Path(os.environ.get("LENTILS_HF_CACHE", str(Path.home() / ".cache" / "cuvis_lentils")))
 
-#: "local" (default on asai2) reads the existing /mnt/data NPZ + the local split CSV;
-#: "hf" downloads cu3s from HF and converts to NPZ. Env-overridable.
-LENTILS_DATA_SOURCE = os.environ.get("LENTILS_DATA_SOURCE", "local").lower()
+#: "hf" (default) downloads cu3s from HF + converts to NPZ on demand; "local" reads pre-existing
+#: NPZ from the CSV in ``LENTILS_SPLITS_CSV``. Env-overridable.
+LENTILS_DATA_SOURCE = os.environ.get("LENTILS_DATA_SOURCE", "hf").lower()
 
-#: The Dinomaly (train-on-normals) split. Local: the npz-path CSV on the dev server.
-LOCAL_SPLITS_CSV = Path(
-    os.environ.get(
-        "LENTILS_SPLITS_CSV",
-        "/home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_dinomaly.csv",
-    )
-)
+#: The local (train-on-normals) split CSV of ``(split, npz_path, image_id)`` — only used in
+#: ``local`` mode; set it via the ``LENTILS_SPLITS_CSV`` env var (no default path).
+LOCAL_SPLITS_CSV = Path(os.environ["LENTILS_SPLITS_CSV"]) if os.environ.get("LENTILS_SPLITS_CSV") else None
 #: Where HF cu3s are downloaded + converted to NPZ (hf mode).
 LENTILS_NPZ_OUT = LENTILS_HF_CACHE / "npz"
 
 #: Trained-pipeline dir the inference notebook reads. Defaults to the RGB train notebook's
-#: output; set ``LENTILS_PIPELINE_DIR`` to evaluate a CIR / concrete run instead.
+#: output; set ``LENTILS_PIPELINE_DIR`` to evaluate a CIR / AdaCLIP-bands run instead.
 LOCAL_PIPELINE_DIR = Path(
     os.environ.get(
         "LENTILS_PIPELINE_DIR",
@@ -71,15 +67,6 @@ LOCAL_PIPELINE_DIR = Path(
 LENTILS_CATEGORIES: dict[int, str] = {
     0: "Unlabeled", 1: "stem_k", 2: "stone", 3: "alu_shard",
     4: "blue_paper", 5: "white_paper", 6: "fly", 7: "rubber",
-}
-
-#: Selector recipes. Each builds the current-dinomaly channel-selector node.
-SELECTOR_SPECS: dict[str, dict[str, Any]] = {
-    "rgb": {"label": "RGB (650/550/450 nm fixed)", "wavelengths": (650.0, 550.0, 450.0)},
-    "cir": {"label": "CIR (NIR 860 / Red 670 / Green 560 nm)",
-            "nir_nm": 860.0, "red_nm": 670.0, "green_nm": 560.0},
-    "adaclip": {"label": "AdaCLIP frozen bands (cube indices 14/59/57)",
-                "band_indices": (14, 59, 57)},
 }
 
 #: The three cube-channel indices AdaCLIP's frozen concrete selector converged to on lentils.
@@ -104,10 +91,12 @@ def resolve_config() -> dict[str, Any]:
         f"cuvis-ai-dinomaly repo."
     )
     if LENTILS_DATA_SOURCE == "local":
-        assert LOCAL_SPLITS_CSV.is_file(), (
-            f"LENTILS_DATA_SOURCE='local' but split CSV missing: {LOCAL_SPLITS_CSV}. "
-            f"Set LENTILS_DATA_SOURCE='hf' to download + convert from HuggingFace."
-        )
+        if LOCAL_SPLITS_CSV is None or not LOCAL_SPLITS_CSV.is_file():
+            raise FileNotFoundError(
+                "LENTILS_DATA_SOURCE='local' needs LENTILS_SPLITS_CSV pointing at a "
+                f"(split, npz_path, image_id) CSV; got {LOCAL_SPLITS_CSV!r}. Use the default "
+                "'hf' source to download + convert from HuggingFace instead."
+            )
     return cfg
 
 
@@ -116,7 +105,7 @@ def resolve_pipeline() -> tuple[Path, Path]:
 
     Picks the single ``*.yaml`` in :data:`LOCAL_PIPELINE_DIR` (a train notebook's
     ``trained_models`` dir) + its sibling ``.pt``. Set ``LENTILS_PIPELINE_DIR`` to choose a
-    specific run (RGB / CIR / concrete).
+    specific run (RGB / CIR / AdaCLIP-bands).
     """
     d = LOCAL_PIPELINE_DIR
     yamls = sorted(d.glob("*.yaml"))
@@ -136,9 +125,9 @@ def resolve_pipeline() -> tuple[Path, Path]:
 def build_selector(mode: str, *, name: str = "selector") -> Any:
     """Return the channel-selector node for ``mode`` on the current dinomaly stack.
 
-    ``rgb`` -> FixedWavelengthSelector(650/550/450); ``cir`` -> CIRSelector(860/670/560).
-    ``concrete`` -> the learnable ConcreteSelector (requires the concrete training branch;
-    see the concrete notebook).
+    ``rgb`` -> FixedWavelengthSelector(650/550/450); ``cir`` -> CIRSelector(860/670/560). For the
+    AdaCLIP frozen bands, resolve wavelengths with :func:`resolve_adaclip_wavelengths` and build a
+    ``FixedWavelengthSelector`` directly (see the adaclip_bands train notebook).
     """
     mode = mode.lower()
     if mode == "rgb":
@@ -192,18 +181,17 @@ def resolve_adaclip_wavelengths(
 
 # --------------------------------------------------------------------------- data
 def resolve_splits_csv() -> Path:
-    """Path to the Dinomaly split CSV the datamodule loads.
+    """Local ``(split, npz_path, image_id)`` split CSV (``local`` mode only).
 
-    Local: the on-server npz-path CSV. HF: downloads ``splits_dinomaly.csv`` (its npz_path
-    column is filled by the convert step — see :func:`ensure_npz`)."""
-    if LENTILS_DATA_SOURCE == "local":
-        return LOCAL_SPLITS_CSV
-    from huggingface_hub import hf_hub_download
-
-    return Path(
-        hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename="splits_dinomaly.csv",
-                        cache_dir=str(LENTILS_HF_CACHE))
-    )
+    The ``hf`` path does not use this — it downloads + converts via :func:`ensure_lentils_npz`,
+    which returns its own split CSV.
+    """
+    if LOCAL_SPLITS_CSV is None:
+        raise FileNotFoundError(
+            "LENTILS_DATA_SOURCE='local' needs LENTILS_SPLITS_CSV set to a "
+            "(split, npz_path, image_id) CSV."
+        )
+    return LOCAL_SPLITS_CSV
 
 
 def subsample_splits_csv(csv_path: str | Path, n_per_split: int, out_path: str | Path) -> Path:
@@ -290,9 +278,14 @@ def ensure_lentils_npz(
 
     out_rows: list[dict[str, Any]] = []
     for cu3s_rel, grp in groups.items():
-        json_rel = grp[0]["json_path"]
+        json_rel = (grp[0].get("json_path") or "").strip()
         cu3s = hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=cu3s_rel, cache_dir=cache)
-        coco = hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=json_rel, cache_dir=cache)
+        # No sibling COCO -> convert without masks (loader emits zeros; frames read as normal).
+        coco = (
+            hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=json_rel, cache_dir=cache)
+            if json_rel
+            else None
+        )
         recs = convert_cu3s_file(
             cu3s,
             out_dir,
@@ -370,11 +363,15 @@ def render_inference_panel(cube_hwc, score_map, *, wavelengths, gt_mask=None,
 
 def per_class_pixel_auroc(scores: list[np.ndarray], class_masks: list[np.ndarray],
                           categories: dict[int, str] | None = None) -> dict[str, float]:
-    """One-vs-background pixel AUROC per non-background class (uses the baked ``class_mask``)."""
+    """One-vs-background pixel AUROC per non-background class (uses the baked ``class_mask``).
+
+    Pools **raw** scores across frames — AUROC is rank-based, so per-frame min-max normalization
+    would not be monotonic across frames and would distort the pooled ranking.
+    """
     from sklearn.metrics import roc_auc_score
 
     categories = categories or LENTILS_CATEGORIES
-    y_s = np.concatenate([_norm(s).ravel() for s in scores]).astype(np.float32)
+    y_s = np.concatenate([np.asarray(s, np.float32).ravel() for s in scores])
     cm = np.concatenate([np.asarray(c).ravel() for c in class_masks])
     out: dict[str, float] = {}
     for cid, cname in categories.items():
@@ -456,14 +453,18 @@ def run_test_inference(pipeline: Any, datamodule: Any, *, device: Any, limit: in
 
 
 def overall_auroc(results: list[dict[str, Any]]) -> dict[str, float]:
-    """Overall pixel + image AUROC over inference results (binary anomaly = ``mask != 0``)."""
+    """Overall pixel + image AUROC over inference results (binary anomaly = ``mask != 0``).
+
+    Pools **raw** scores across frames (AUROC is rank-based); per-frame normalization would not be
+    a global monotonic transform and would distort the pooled pixel ranking. ``_norm`` is display-only.
+    """
     from sklearn.metrics import roc_auc_score
 
     px_s, px_y, img_s, img_y = [], [], [], []
     for r in results:
         if r.get("score_map") is None or r.get("mask") is None:
             continue
-        px_s.append(_norm(r["score_map"]).ravel())
+        px_s.append(np.asarray(r["score_map"], np.float32).ravel())
         px_y.append((r["mask"].ravel() != 0).astype(int))
         img_y.append(int((r["mask"] != 0).any()))
         img_s.append(
