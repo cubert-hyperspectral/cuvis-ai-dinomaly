@@ -40,22 +40,22 @@ train-on-normals split (`splits_dinomaly.csv` on HF):
 `val` (148) and `test` (180) are identical to the supervised **adaclip** baseline's split, so the
 two models stay directly comparable.
 
-## Data: local (verified) vs HuggingFace (pending)
+## Data: local vs HuggingFace (both verified)
 
 The datamodule reads a splits CSV of `(split, npz_path, image_id)`; each NPZ carries
 `cube [H,W,61]`, `wavelengths [61]`, and — for annotated frames — a baked binary `mask [H,W]` and
 category `class_mask [H,W]` (normal frames have no mask key; the loader emits zeros).
 
-- **`local` (default, verified).** The on-server per-frame NPZ already carry correct baked masks
-  (validated 180/180 byte-for-byte against the GT COCO). The train/inference notebooks read them
-  via the local split CSV (`diagnostics/lentils_splits_npz_dinomaly.csv`). Set
-  `LENTILS_DATA_SOURCE=local` (the default).
-- **`hf` (download → convert) — verified.** `ensure_lentils_npz()` downloads the cu3s + their
-  per-session COCO (`json_path`) from HF and converts to NPZ. Each per-session cu3s is indexed by
-  its **measurement index = `local_image_id`**, which is also the `image_id` in that session's
-  COCO — so frames are read + labelled by `local_image_id` (`camera_frame_num` is the original
-  camera counter, *not* the cu3s index). Verified end-to-end on a subset: normal frames → empty
-  mask, annotated frames → baked class ids matching the GT `category_labels`.
+- **`hf` (download → convert) — the default, verified.** `ensure_lentils_npz()` downloads the
+  cu3s + their per-session COCO (`json_path`) from HF and converts to NPZ. Each per-session cu3s is
+  indexed by its **measurement index = `local_image_id`**, which is also the `image_id` in that
+  session's COCO — so frames are read + labelled by `local_image_id` (`camera_frame_num` is the
+  original camera counter, *not* the cu3s index). Verified end-to-end **on a fresh machine at 20
+  epochs** for all three variants (see *Reproduce from scratch* + *Validated results* below):
+  normal frames → empty mask, annotated frames → baked class ids matching the GT `category_labels`.
+- **`local` — verified.** Reads pre-existing per-frame NPZ (correct baked masks; validated 180/180
+  byte-for-byte vs the GT COCO) via a `(split, npz_path, image_id)` CSV. Set
+  `LENTILS_DATA_SOURCE=local` + `LENTILS_SPLITS_CSV=<that CSV>`.
   - **Extra deps:** this path reads cu3s, so it needs the cu3s reader stack — `cuvis` SDK +
     `dataclass_wizard` (`uv pip install 'cuvis-ai-dataloader[cu3s,coco]'`). The `local` path doesn't.
   - **Note:** the cuvis SDK may abort the *process* on session teardown (after all files are
@@ -129,10 +129,69 @@ uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
   --output-dir    <run>/eval_test
 ```
 
-## What is verified here
+## Reproduce from scratch on a fresh machine (from HuggingFace)
 
-- All four notebooks run end-to-end on the current stack (1-epoch × few-frame smokes): each train
-  notebook builds its pipeline, trains, and saves a loadable `.yaml`/`.pt`; the inference notebook
-  loads a saved pipeline and computes overall + per-class AUROC on a mixed test subset.
-- Smoke numbers are meaningless by construction (1 epoch, tiny subset). For a real, comparable
-  result run the full 50 epochs on the complete split.
+End-to-end recipe, validated on a clean box (RTX 4090). All data comes from HuggingFace.
+
+**0. Prerequisites**
+- A CUDA GPU + recent driver.
+- The **Cuvis C SDK** installed, with the `CUVIS` env var pointing at its dir (the `cuvis` Python
+  bindings dynamically link `libcuvis.so`). The convert step reads cu3s, so this is required;
+  training/inference on the NPZ is pure Python and does not need it.
+- `uv`, `git`, an **HF token** (`huggingface-cli login`), and — only if you want the pipeline PNGs
+  from the training scripts — `graphviz` (`sudo apt install graphviz`; otherwise the scripts just
+  log a warning and skip the diagram).
+
+**1. Clone + environment**
+```bash
+git clone <cuvis-ai-dinomaly> && cd cuvis-ai-dinomaly && git checkout <branch/tag>
+git clone <cuvis-ai-dataloader> && (cd ../cuvis-ai-dataloader && git checkout <branch/tag>)
+uv sync --extra examples                              # framework + torch (cu12x) + anomalib
+uv pip install -e '../cuvis-ai-dataloader[cu3s,coco]' # cu3s reader + COCO labeler + cuvis bindings
+export CUVIS=/path/to/cuvis-sdk                       # dir containing libcuvis.so
+```
+(Once cuvis-ai-dataloader releases with the converter + `class_mask`, swap the editable install for
+`uv pip install 'cuvis-ai-dataloader[cu3s,coco]>=<version>'` and drop the local clone.)
+
+**2. Download + convert from HF → per-frame NPZ**
+The train-on-normals split is `splits_dinomaly.csv` on the HF dataset. Its train/val/test frames
+(636) convert to per-frame NPZ (grouped by cu3s; each session downloaded once). Simplest driver:
+```python
+import utils  # notebooks/lentils_anomaly/utils.py
+csv = utils.ensure_lentils_npz("<npz_out_dir>")   # HF download + convert -> (split, npz_path, image_id) CSV
+```
+Tip: convert one session per subprocess — the cuvis SDK aborts the *process* on session teardown
+*after* the files are written, so per-session isolation keeps a long convert resumable + lossless.
+
+**3. Train (per variant) + infer**
+```bash
+# 20 (or 50) epochs; config defaults = 448px, 6 workers, AdamW, best-checkpoint
+uv run python examples/train_dinomaly_rgb_multifile.py     data.splits_csv=<CSV> output_dir=<OUT>/rgb     training.trainer.max_epochs=20
+uv run python examples/train_dinomaly_cir_multifile.py     data.splits_csv=<CSV> output_dir=<OUT>/cir     training.trainer.max_epochs=20
+uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py data.splits_csv=<CSV> output_dir=<OUT>/adaclip training.trainer.max_epochs=20
+# inference — per-class AUROC on the 180-frame test (notebook, or the eval CLI):
+uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
+  --pipeline-yaml <OUT>/rgb/trained_models/dinomaly_multifile_rgb.yaml \
+  --pipeline-pt   <OUT>/rgb/trained_models/dinomaly_multifile_rgb.pt \
+  --splits-csv <CSV> --output-dir <OUT>/rgb/eval
+```
+
+## Validated results (fresh machine, 20 epochs, from HF, 180-frame test)
+
+| variant | pixel AUROC | image AUROC |
+|---|---|---|
+| RGB | 0.944 | 0.728 |
+| CIR | 0.994 | 0.893 |
+| AdaCLIP-bands | 0.994 | 0.929 |
+
+Per-class pixel AUROC is 0.90–1.00 across the categories (`blue_paper` ≈ 1.0 for all variants). CIR
+and AdaCLIP-bands clearly beat plain RGB; AdaCLIP-bands has the best image-level AUROC. These are
+20-epoch numbers — a full 50-epoch run would likely improve them. (RGB pixel 0.944 already
+matches/exceeds the old defunct-`dinomaly2` 0.915, which is *not* a target — see the
+dinomaly-not-dinomaly2 note above.)
+
+## What is verified
+- The full path — **HuggingFace → convert → train → inference** — runs end-to-end on a *fresh
+  machine* (fresh clone, freshly-provisioned SDK) for all three variants, with no code changes.
+- Baked masks match the GT `category_labels` across day2/day3/day4 sessions + a no-COCO control.
+- All four notebooks run end-to-end; the scripts run the full 20-epoch training + eval.
