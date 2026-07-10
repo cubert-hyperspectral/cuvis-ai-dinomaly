@@ -14,7 +14,11 @@ output_dir: ./outputs/${name}
 minmax_init_frames: 20
 
 data:
-  splits_csv: /path/to/your/splits.csv  # set to your actual splits CSV path
+  # NPZ backend (default): a convert_split_manifest output pair.
+  universe_csv: /path/to/your/universe.csv
+  splits_json: /path/to/your/splits.json
+  # CU3S backend: comment the two lines above and set splits_csv instead.
+  # splits_csv: /path/to/your/splits.csv
   batch_size: 1
   processing_mode: Reflectance
   num_workers: 6
@@ -32,21 +36,20 @@ dinomaly:
 
 training:
   seed: 42
-  trainer:
-    max_epochs: 50
-    accelerator: auto
-    devices: 1
-    default_root_dir: ${output_dir}
-    precision: 32-true
-    accumulate_grad_batches: 1
-    enable_progress_bar: true
-    enable_checkpointing: true
-    log_every_n_steps: 10
-    val_check_interval: 1.0
-    check_val_every_n_epoch: 1
-    gradient_clip_val: 0.1
-    deterministic: false
-    benchmark: false
+  max_epochs: 50
+  accelerator: auto
+  devices: 1
+  default_root_dir: ${output_dir}
+  precision: 32-true
+  accumulate_grad_batches: 1
+  enable_progress_bar: true
+  enable_checkpointing: true
+  log_every_n_steps: 10
+  val_check_interval: 1.0
+  check_val_every_n_epoch: 1
+  gradient_clip_val: 0.1
+  deterministic: false
+  benchmark: false
   optimizer:
     name: adamw
     lr: 0.002

@@ -98,8 +98,8 @@ auto-detected: a `npz_path` column → `MultiNpzDataModule`, else `MultiCu3sData
 # RGB (fixed wavelengths). <SPLITS> = your (split, npz_path, image_id) CSV; <OUT> = output dir.
 uv run python examples/train_dinomaly_rgb_multifile.py \
   output_dir=<OUT>/dinomaly_rgb_50ep \
-  training.trainer.max_epochs=50 \
-  data.splits_csv=<SPLITS> \
+  training.max_epochs=50 \
+  data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> \
   data.num_workers=6 data.persistent_workers=true eval_mode=best
 
 # CIR (NIR / Red / Green) — same, via:
@@ -125,7 +125,7 @@ uv run python examples/train_dinomaly_concrete_joint_multifile.py <same override
 uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
   --pipeline-yaml <run>/trained_models/<name>.yaml \
   --pipeline-pt   <run>/trained_models/<name>.pt \
-  --splits-csv    <SPLITS> \
+  --universe-csv     <INDEX> --splits-json <SPLITS_JSON> \
   --output-dir    <run>/eval_test
 ```
 
@@ -166,14 +166,14 @@ Tip: convert one session per subprocess — the cuvis SDK aborts the *process* o
 **3. Train (per variant) + infer**
 ```bash
 # 20 (or 50) epochs; config defaults = 448px, 6 workers, AdamW, best-checkpoint
-uv run python examples/train_dinomaly_rgb_multifile.py     data.splits_csv=<CSV> output_dir=<OUT>/rgb     training.trainer.max_epochs=20
-uv run python examples/train_dinomaly_cir_multifile.py     data.splits_csv=<CSV> output_dir=<OUT>/cir     training.trainer.max_epochs=20
-uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py data.splits_csv=<CSV> output_dir=<OUT>/adaclip training.trainer.max_epochs=20
+uv run python examples/train_dinomaly_rgb_multifile.py     data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/rgb     training.max_epochs=20
+uv run python examples/train_dinomaly_cir_multifile.py     data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/cir     training.max_epochs=20
+uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/adaclip training.max_epochs=20
 # inference — per-class AUROC on the 180-frame test (notebook, or the eval CLI):
 uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
   --pipeline-yaml <OUT>/rgb/trained_models/dinomaly_multifile_rgb.yaml \
   --pipeline-pt   <OUT>/rgb/trained_models/dinomaly_multifile_rgb.pt \
-  --splits-csv <CSV> --output-dir <OUT>/rgb/eval
+  --universe-csv  <INDEX> --splits-json <SPLITS_JSON> --output-dir <OUT>/rgb/eval
 ```
 
 ## Validated results (fresh machine, 20 epochs, from HF, 180-frame test)

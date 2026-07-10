@@ -75,14 +75,16 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 
 ## 4. Data
 
-### 4a. Split CSV (what you pass as `data.splits_csv`)
+### 4a. Split artifacts (what you pass in `data`)
 
-The datamodule **auto-detects the backend** from the CSV header:
+The backend is chosen by which config keys you set:
 
-- **NPZ backend** (`MultiNpzDataModule`) — CSV has an **`npz_path`** column. Columns used:
-  `split, npz_path, image_id`. This is the fast path and what we used.
-- **cu3s backend** (`MultiCu3sDataModule`) — no `npz_path` column; reads cu3s directly
-  (`processing_mode: Reflectance`).
+- **NPZ backend** (`MultiNpzDataModule`) — set `data.universe_csv` (the universe lookup
+  `source, index, path`) **and** `data.splits_json` (a core `DataSplitConfig` whose
+  `file_indices` selectors assign train/val/test). Both are produced by
+  `convert_split_manifest`. This is the fast path and what we used.
+- **cu3s backend** (`MultiCu3sDataModule`) — set `data.splits_csv` (the cu3s_multi
+  module-owned split CSV); reads cu3s directly (`processing_mode: Reflectance`).
 
 `split ∈ {train, val, test}` are consumed; any other value (e.g. `adaclip_train`) is ignored.
 
@@ -126,18 +128,18 @@ From the repo root. `<SPLITS>` = your split CSV (NPZ backend recommended), `<OUT
 ```bash
 # RGB (fixed 650/550/450)
 uv run python examples/train_dinomaly_rgb_multifile.py \
-  data.splits_csv=<SPLITS> output_dir=<OUT>/dinomaly_rgb \
-  training.trainer.max_epochs=50 eval_mode=best
+  data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/dinomaly_rgb \
+  training.max_epochs=50 eval_mode=best
 
 # CIR (NIR/Red/Green)
 uv run python examples/train_dinomaly_cir_multifile.py \
-  data.splits_csv=<SPLITS> output_dir=<OUT>/dinomaly_cir \
-  training.trainer.max_epochs=50 eval_mode=best
+  data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/dinomaly_cir \
+  training.max_epochs=50 eval_mode=best
 
 # AdaCLIP frozen bands (indices 14/59/57 → nm resolved from the data)
 uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py \
-  data.splits_csv=<SPLITS> output_dir=<OUT>/dinomaly_adaclip \
-  training.trainer.max_epochs=50
+  data.universe_csv=<INDEX> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/dinomaly_adaclip \
+  training.max_epochs=50
 ```
 
 Any config key is overridable on the command line (Hydra). Useful ones:
@@ -183,7 +185,7 @@ Each run writes to `<OUT>/...`:
 uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
   --pipeline-yaml <OUT>/trained_models/<name>.yaml \
   --pipeline-pt   <OUT>/trained_models/<name>.pt \
-  --splits-csv    <SPLITS> \
+  --universe-csv     <INDEX> --splits-json <SPLITS_JSON> \
   --output-dir    <OUT>/eval_test
 ```
 

@@ -111,7 +111,7 @@ Training scripts are in [`examples/`](examples/). Each pairs with a matching Hyd
 | `run_saved_dinomaly_pipeline_test_npz.py` | Run inference on saved pipeline |
 | `export_dinomaly_multifile_pipeline_from_ckpt.py` | Export pipeline from checkpoint |
 
-Quick start (edit `splits_csv` in the config first):
+Quick start (edit `universe` + `splits_json` in the config first):
 
 ```bash
 uv run python examples/train_dinomaly_rgb_multifile.py

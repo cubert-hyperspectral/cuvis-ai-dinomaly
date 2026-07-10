@@ -25,12 +25,13 @@ from pathlib import Path
 from typing import Literal
 
 import torch
-from cuvis_ai.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.channel_selector import CIRSelector, FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
+from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
+from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
@@ -50,16 +51,6 @@ def _batch_to_device(batch: dict, device: torch.device) -> dict:
     return out
 
 
-def _infer_backend(splits_csv: Path) -> Literal["npz", "cu3s"]:
-    if not splits_csv.is_file():
-        return "cu3s"
-    try:
-        header = splits_csv.open(encoding="utf-8").readline()
-    except OSError:
-        return "cu3s"
-    return "npz" if "npz_path" in header else "cu3s"
-
-
 def build_pipeline_and_datamodule(
     *,
     cfg: object,
@@ -75,17 +66,17 @@ def build_pipeline_and_datamodule(
         "cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge",
     )
 
-    splits_csv_path = Path(cfg.data.splits_csv)
-    backend = _infer_backend(splits_csv_path)
     # Export runs a fresh StatisticalTrainer pass; NPZ dataset + spawn workers often
     # hit PicklingError (same as full training). Use a single-threaded loader here.
+    # NPZ backend: data.universe_csv + data.splits_json. CU3S backend: data.splits_csv.
     common_loader_kwargs = {
-        "splits_csv": str(splits_csv_path),
         "batch_size": int(cfg.data.batch_size),
         "num_workers": 0,
     }
-    if backend == "npz":
+    if cfg.data.get("universe_csv", None):
         datamodule = MultiNpzDataModule(
+            universe_csv=str(cfg.data.universe_csv),
+            splits=load_splits(cfg.data.splits_json),
             **common_loader_kwargs,
             pin_memory=bool(cfg.data.get("pin_memory", True)),
             persistent_workers=False,
@@ -95,6 +86,7 @@ def build_pipeline_and_datamodule(
         )
     else:
         datamodule = MultiCu3sDataModule(
+            splits_csv=str(cfg.data.splits_csv),
             **common_loader_kwargs,
             processing_mode=str(cfg.data.processing_mode),
         )
@@ -175,8 +167,7 @@ def build_pipeline_and_datamodule(
         datamodule=datamodule,
         loss_nodes=[loss_bridge],
         metric_nodes=[metrics_node],
-        trainer_config=training_cfg.trainer,
-        optimizer_config=training_cfg.optimizer,
+        training_config=training_cfg,
         monitors=[tb],
         callbacks=[],
     )

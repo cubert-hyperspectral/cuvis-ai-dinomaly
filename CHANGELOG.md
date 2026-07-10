@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Renamed the npz universe input `index_csv` → `universe_csv`.** The `MultiNpzDataModule` argument and
+  the `data.index_csv` trainrun key are now `universe_csv` / `data.universe_csv`, pointing at a `universe.csv`
+  whose columns are `source, index, path` (was `npz_path, source, image_id`). Updated the 6
+  `configs/trainrun/*.yaml`, the multifile example scripts, `run_saved_dinomaly_pipeline_test_npz.py`
+  (`--universe-csv`), and the RGB tutorial notebook. Regenerate the npz `universe.csv` (the converter
+  emits the new columns). Needs the cuvis-ai-dataloader carrying the same rename.
+- **Adopted the flat `TrainingConfig` (needs `cuvis-ai-core>=0.11.0` / `cuvis-ai-schemas>=0.8.0`).** `TrainerConfig` was folded into `TrainingConfig` upstream: the nested `trainer:` block is gone from `configs/training/default.yaml` and every `configs/trainrun/*.yaml` (its `pytorch_lightning.Trainer` fields now sit flat under `training:`), the example scripts and tutorial notebooks build a single flat `TrainingConfig` and pass `training_config=` to `GradientTrainer` (was `trainer_config=`/`optimizer_config=`), and Hydra overrides use `training.<field>=…` instead of `training.trainer.<field>=…`.
+
 ## 0.4.0 - 2026-07-01
 
 - **Moved the NPZ data layer to cuvis-ai-dataloader.** Deleted `cuvis_ai_dinomaly/data/`
