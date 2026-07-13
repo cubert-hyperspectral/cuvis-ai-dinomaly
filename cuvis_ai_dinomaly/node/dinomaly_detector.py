@@ -8,7 +8,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from cuvis_ai_core.node.node import Node
-from cuvis_ai_schemas.enums import ExecutionStage
+from cuvis_ai_schemas.enums import ExecutionStage, NodeCategory, NodeTag
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PortSpec
 from loguru import logger
@@ -51,6 +51,17 @@ class DinomalyDetector(Node):
     ---------
     Emits ``scores`` ``[B, H, W, 1]`` and ``anomaly_score`` ``[B]`` from eval forward.
     """
+
+    _category = NodeCategory.MODEL
+    _tags = frozenset(
+        {
+            NodeTag.HYPERSPECTRAL,
+            NodeTag.ANOMALY,
+            NodeTag.RECONSTRUCTION,
+            NodeTag.LEARNABLE,
+            NodeTag.TORCH,
+        }
+    )
 
     INPUT_SPECS = {
         "rgb_image": PortSpec(
