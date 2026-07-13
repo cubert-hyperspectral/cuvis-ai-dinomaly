@@ -41,8 +41,12 @@ dependencies = [
     # eagerly imports the proprietary Cuvis SDK (cuvis_il sys.exit / native libs)
     # at module load. Plugins should target cuvis-ai-core + cuvis-ai-schemas
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
-    "cuvis-ai-core>=0.11.0",
-    "cuvis-ai-schemas>=0.8.0",
+    # Published floors, temporarily relaxed. The flat TrainingConfig actually needs cuvis-ai-core
+    # 0.11.0 / cuvis-ai-schemas 0.8.0 (supplied for now by the [tool.uv.sources] editables below);
+    # the floors sit at the published versions so `uv lock --no-sources` / CI resolve. Bump back
+    # to >=0.11.0 / >=0.8.0 once those release.
+    "cuvis-ai-core>=0.10.0",
+    "cuvis-ai-schemas>=0.7.0",
     "anomalib==2.1.0",
     "kornia==0.6.12",
     "numpy>=1.20.0",
