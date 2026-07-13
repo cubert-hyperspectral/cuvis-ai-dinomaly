@@ -6,9 +6,10 @@
   the `data.index_csv` trainrun key are now `universe_csv` / `data.universe_csv`, pointing at a `universe.csv`
   whose columns are `source, index, path` (was `npz_path, source, image_id`). Updated the 6
   `configs/trainrun/*.yaml`, the multifile example scripts, `run_saved_dinomaly_pipeline_test_npz.py`
-  (`--universe-csv`), and the RGB tutorial notebook. Regenerate the npz `universe.csv` (the converter
+  (`--universe-csv`), and the tutorial notebooks. Regenerate the npz `universe.csv` (the converter
   emits the new columns). Needs the cuvis-ai-dataloader carrying the same rename.
 - **Adopted the flat `TrainingConfig` (needs `cuvis-ai-core>=0.11.0` / `cuvis-ai-schemas>=0.8.0`).** `TrainerConfig` was folded into `TrainingConfig` upstream: the nested `trainer:` block is gone from `configs/training/default.yaml` and every `configs/trainrun/*.yaml` (its `pytorch_lightning.Trainer` fields now sit flat under `training:`), the example scripts and tutorial notebooks build a single flat `TrainingConfig` and pass `training_config=` to `GradientTrainer` (was `trainer_config=`/`optimizer_config=`), and Hydra overrides use `training.<field>=…` instead of `training.trainer.<field>=…`.
+- **Migrated the tutorial notebooks to the selector split model.** The lentils notebooks (`rgb`, `cir`, `adaclip_bands`, `inference`) and the bedding train notebook now build a `universe.csv` + a baked `splits.json` and load via `MultiNpzDataModule(splits=DataSplitConfig(splits_path=...), universe_csv=...)` instead of the removed `splits_csv=`. Shared `notebooks/lentils_anomaly/utils.py` gains `prepare_lentils_data` (download + `convert_split_manifest`), drops the old `(split, npz_path, image_id)` CSV helpers (`ensure_lentils_npz` / `resolve_splits_csv` / `subsample_splits_csv` / the `LENTILS_DATA_SOURCE` toggle), reads universe `path` / `index` records, and resolves the AdaCLIP bands from the `universe.csv`; the generated lentils splits.json is identical to the dataset's shipped `splits/dinomaly.json`. Also fixed a stale `TensorBoardMonitorNode` import and a `params={"universe": ...}` key in the RGB notebook, and refreshed REPRODUCTION.md.
 
 ## 0.4.0 - 2026-07-01
 

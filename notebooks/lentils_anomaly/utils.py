@@ -1,36 +1,39 @@
 """Shared helpers for the lentils × Dinomaly tutorial notebooks.
 
 Four notebooks ride on these helpers, all on the current **`dinomaly`** plugin
-(`cuvis_ai_dinomaly` / `DinomalyDetector`) — never the defunct `dinomaly2`:
+(`cuvis_ai_dinomaly` / `DinomalyDetector`) -- never the defunct `dinomaly2`:
 
-- ``lentils_rgb_train_tutorial.ipynb``          — train with the RGB fixed-wavelength selector
-- ``lentils_cir_train_tutorial.ipynb``          — train with the CIR (NIR/Red/Green) selector
-- ``lentils_adaclip_bands_train_tutorial.ipynb``— train with the 3 bands AdaCLIP's frozen concrete
+- ``lentils_rgb_train_tutorial.ipynb``          -- train with the RGB fixed-wavelength selector
+- ``lentils_cir_train_tutorial.ipynb``          -- train with the CIR (NIR/Red/Green) selector
+- ``lentils_adaclip_bands_train_tutorial.ipynb``-- train with the 3 bands AdaCLIP's frozen concrete
                                                   selector converged to (indices 14/59/57), fixed
-- ``lentils_inference_tutorial.ipynb``          — load a trained pipeline, eval on the 180 test,
+- ``lentils_inference_tutorial.ipynb``          -- load a trained pipeline, eval on the 180 test,
                                                   per-class AUROC breakdown
 
 Lentils dataset
 ---------------
-61-channel VNIR (430–910 nm), foreign-object anomaly detection. Published on HuggingFace at
+61-channel VNIR (430-910 nm), foreign-object anomaly detection. Published on HuggingFace at
 ``cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils`` (merged cu3s sessions per day +
-per-day global COCO). The Dinomaly split (train-on-normals) is the HF ``splits_dinomaly.csv``:
-train 308 (normal) / val 148 / test 180 / adaclip_train 500 (held out).
+per-day global COCO). The Dinomaly split (train-on-normals) is the dataset's
+``splits_dinomaly.csv``: train 308 (normal) / val 148 / test 180 / adaclip_train 500 (held out).
 
-Workflow
---------
-1. Download cu3s from HF (``huggingface-cli download`` / ``snapshot_download``).
-2. Convert to per-frame NPZ with baked ``mask`` + ``class_mask`` via cuvis-ai-dataloader's
-   ``cu3s-to-npz`` (NPZ are never stored on HF).
-3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``).
+Data workflow (the selector split model)
+----------------------------------------
+1. Download the cu3s dataset from HF via
+   :class:`cuvis_ai_core.data.public_datasets.PublicDatasets`.
+2. Convert each ``splits_dinomaly.csv`` frame to per-frame NPZ (baked ``mask`` + ``class_mask``)
+   with cuvis-ai-dataloader's ``convert_split_manifest``, emitting two artifacts: a
+   **universe.csv** (``source, index, path``: the sample universe, one row per frame) and a baked
+   **splits.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors). The generated
+   splits.json is identical to the dataset's shipped ``splits/dinomaly.json``.
+3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``), given the splits.json
+   (``DataSplitConfig(splits_path=...)``) resolved over the ``universe_csv``.
 
-``LENTILS_DATA_SOURCE`` selects the data path: ``hf`` (default) downloads + converts on demand;
-``local`` reads pre-existing NPZ from the CSV in ``LENTILS_SPLITS_CSV``.
+:func:`prepare_lentils_data` runs steps 1-2 and returns ``(splits_json, universe_csv)``.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -42,28 +45,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
 
 LENTILS_HF_REPO_ID = "cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils"
-LENTILS_HF_CACHE = Path(os.environ.get("LENTILS_HF_CACHE", str(Path.home() / ".cache" / "cuvis_lentils")))
+#: PublicDatasets registry name / alias for the dataset (see cuvis-ai-core public_datasets).
+LENTILS_DATASET_NAME = "industrial_fod_lentils"
 
-#: "hf" (default) downloads cu3s from HF + converts to NPZ on demand; "local" reads pre-existing
-#: NPZ from the CSV in ``LENTILS_SPLITS_CSV``. Env-overridable.
-LENTILS_DATA_SOURCE = os.environ.get("LENTILS_DATA_SOURCE", "hf").lower()
-
-#: The local (train-on-normals) split CSV of ``(split, npz_path, image_id)`` — only used in
-#: ``local`` mode; set it via the ``LENTILS_SPLITS_CSV`` env var (no default path).
-LOCAL_SPLITS_CSV = Path(os.environ["LENTILS_SPLITS_CSV"]) if os.environ.get("LENTILS_SPLITS_CSV") else None
-#: Where HF cu3s are downloaded + converted to NPZ (hf mode).
-LENTILS_NPZ_OUT = LENTILS_HF_CACHE / "npz"
-
-#: Trained-pipeline dir the inference notebook reads. Defaults to the RGB train notebook's
-#: output; set ``LENTILS_PIPELINE_DIR`` to evaluate a CIR / AdaCLIP-bands run instead.
-LOCAL_PIPELINE_DIR = Path(
-    os.environ.get(
-        "LENTILS_PIPELINE_DIR",
-        str(REPO_ROOT / "notebooks" / "lentils_anomaly" / "outputs" / "lentils_adaclip_run" / "trained_models"),
-    )
+#: Trained-pipeline dir the inference notebook reads by default (the RGB train notebook's output).
+#: Pass a different dir to :func:`resolve_pipeline` to evaluate a CIR / AdaCLIP-bands run.
+DEFAULT_PIPELINE_DIR = (
+    REPO_ROOT / "notebooks" / "lentils_anomaly" / "outputs" / "lentils_rgb_run" / "trained_models"
 )
 
-#: COCO category id → name (per-day global COCO; 0 = background/unlabeled).
+#: COCO category id -> name (per-day global COCO; 0 = background/unlabeled).
 LENTILS_CATEGORIES: dict[int, str] = {
     0: "Unlabeled", 1: "stem_k", 2: "stone", 3: "alu_shard",
     4: "blue_paper", 5: "white_paper", 6: "fly", 7: "rubber",
@@ -78,36 +69,74 @@ ADACLIP_BAND_INDICES: tuple[int, int, int] = (14, 59, 57)
 def resolve_config() -> dict[str, Any]:
     """Notebook-time config (no downloads). Asserts the plugins manifest (ships in the repo)."""
     cfg = {
-        "data_source": LENTILS_DATA_SOURCE,
         "hf_repo_id": LENTILS_HF_REPO_ID,
+        "dataset_name": LENTILS_DATASET_NAME,
         "plugins_yaml": DEFAULT_PLUGINS_YAML,
-        "splits_csv": LOCAL_SPLITS_CSV,
-        "npz_out": LENTILS_NPZ_OUT,
-        "local_pipeline_dir": LOCAL_PIPELINE_DIR,
+        "default_pipeline_dir": DEFAULT_PIPELINE_DIR,
         "categories": LENTILS_CATEGORIES,
     }
     assert DEFAULT_PLUGINS_YAML.exists(), (
         f"Plugins manifest not found at {DEFAULT_PLUGINS_YAML}. Run from inside the "
         f"cuvis-ai-dinomaly repo."
     )
-    if LENTILS_DATA_SOURCE == "local":
-        if LOCAL_SPLITS_CSV is None or not LOCAL_SPLITS_CSV.is_file():
-            raise FileNotFoundError(
-                "LENTILS_DATA_SOURCE='local' needs LENTILS_SPLITS_CSV pointing at a "
-                f"(split, npz_path, image_id) CSV; got {LOCAL_SPLITS_CSV!r}. Use the default "
-                "'hf' source to download + convert from HuggingFace instead."
-            )
     return cfg
 
 
-def resolve_pipeline() -> tuple[Path, Path]:
-    """Return ``(yaml_path, pt_path)`` for a trained lentils pipeline (local).
+def prepare_lentils_data(
+    npz_dir: str | Path,
+    *,
+    dataset_dir: str | Path | None = None,
+    limit: int = 0,
+) -> tuple[Path, Path]:
+    """Fetch the lentils cu3s dataset and materialize the NPZ + split artifacts.
 
-    Picks the single ``*.yaml`` in :data:`LOCAL_PIPELINE_DIR` (a train notebook's
-    ``trained_models`` dir) + its sibling ``.pt``. Set ``LENTILS_PIPELINE_DIR`` to choose a
-    specific run (RGB / CIR / AdaCLIP-bands).
+    Downloads the dataset from HuggingFace (skipped when already on disk), then converts the
+    ``splits_dinomaly.csv`` frames to per-frame NPZ, emitting a baked ``splits.json`` and a
+    ``universe.csv`` (``source, index, path``). Returns ``(splits_json, universe_csv)``, ready
+    for ``MultiNpzDataModule(splits=DataSplitConfig(splits_path=splits_json),
+    universe_csv=universe_csv)``. Reruns reuse already-converted frames, so it is cheap to call.
+
+    Parameters
+    ----------
+    npz_dir
+        Where the per-frame NPZ + ``splits.json`` / ``universe.csv`` are written.
+    dataset_dir
+        Where the raw cu3s dataset is downloaded (default: ``<repo>/../../data``).
+    limit
+        If > 0, keep at most this many frames per split (fast dry-run).
     """
-    d = LOCAL_PIPELINE_DIR
+    from cuvis_ai_core.data.public_datasets import PublicDatasets
+    from cuvis_ai_dataloader.data.npz_converter import convert_split_manifest
+
+    npz_dir = Path(npz_dir)
+    splits_json = npz_dir / "splits.json"
+    universe_csv = npz_dir / "universe.csv"
+    dataset_dir = Path(dataset_dir) if dataset_dir else (REPO_ROOT / "data")
+    raw_dir = dataset_dir / "XMR_Industrial_Foreign_Object_Detection_Lentils"
+
+    if not (splits_json.is_file() and universe_csv.is_file()):
+        PublicDatasets.download_dataset(
+            LENTILS_DATASET_NAME, download_path=str(dataset_dir), force=False
+        )
+        result = convert_split_manifest(
+            raw_dir / "splits_dinomaly.csv",
+            raw_dir,
+            npz_dir,
+            universe_csv=universe_csv,
+            splits_json=splits_json,
+            limit=limit,
+        )
+        splits_json, universe_csv = result.splits_json, result.universe_csv
+    return splits_json, universe_csv
+
+
+def resolve_pipeline(pipeline_dir: str | Path = DEFAULT_PIPELINE_DIR) -> tuple[Path, Path]:
+    """Return ``(yaml_path, pt_path)`` for a trained lentils pipeline.
+
+    Picks the single ``*.yaml`` in ``pipeline_dir`` (a train notebook's ``trained_models`` dir) +
+    its sibling ``.pt``. Pass a specific run's dir (RGB / CIR / AdaCLIP-bands) to choose.
+    """
+    d = Path(pipeline_dir)
     yamls = sorted(d.glob("*.yaml"))
     if not yamls:
         raise FileNotFoundError(
@@ -152,26 +181,27 @@ def build_selector(mode: str, *, name: str = "selector") -> Any:
 
 
 def resolve_adaclip_wavelengths(
-    splits_csv: str | Path, indices: tuple[int, int, int] = ADACLIP_BAND_INDICES
+    universe_csv: str | Path, indices: tuple[int, int, int] = ADACLIP_BAND_INDICES
 ) -> tuple[float, float, float]:
-    """Map AdaCLIP's frozen band ``indices`` to wavelengths (nm) using the first train NPZ.
+    """Map AdaCLIP's frozen band ``indices`` to wavelengths (nm) using the first universe NPZ.
 
-    Mirrors ``examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py``: reads the
-    ``wavelengths`` array of the first ``split == train`` row (or the first row with an
-    ``npz_path``) and returns ``(w[i0], w[i1], w[i2])`` in R,G,B order.
+    Reads the ``path`` of the first row in the ``universe.csv`` (``source, index, path``; the path
+    is relative to the CSV), loads its ``wavelengths`` array, and returns
+    ``(w[i0], w[i1], w[i2])`` in R,G,B order.
     """
     import csv as _csv
 
-    with open(splits_csv, newline="") as f:
-        rows = list(_csv.DictReader(f))
-    train_rows = [r for r in rows if r.get("split") == "train" and (r.get("npz_path") or "").strip()]
-    if not train_rows:
-        train_rows = [r for r in rows if (r.get("npz_path") or "").strip()]
-    if not train_rows:
-        raise ValueError(f"No rows with npz_path in {splits_csv}")
-    with np.load(train_rows[0]["npz_path"]) as z:
+    universe_csv = Path(universe_csv)
+    with open(universe_csv, newline="") as f:
+        rows = [r for r in _csv.DictReader(f) if (r.get("path") or "").strip()]
+    if not rows:
+        raise ValueError(f"No rows with a path in {universe_csv}")
+    npz_path = Path(rows[0]["path"])
+    if not npz_path.is_absolute():
+        npz_path = (universe_csv.parent / npz_path).resolve()
+    with np.load(npz_path) as z:
         if "wavelengths" not in z.files:
-            raise KeyError(f"{train_rows[0]['npz_path']} has no 'wavelengths'")
+            raise KeyError(f"{npz_path} has no 'wavelengths'")
         w = np.asarray(z["wavelengths"], dtype=np.float64).ravel()
     for i in indices:
         if not (0 <= i < len(w)):
@@ -180,131 +210,8 @@ def resolve_adaclip_wavelengths(
 
 
 # --------------------------------------------------------------------------- data
-def resolve_splits_csv() -> Path:
-    """Local ``(split, npz_path, image_id)`` split CSV (``local`` mode only).
-
-    The ``hf`` path does not use this — it downloads + converts via :func:`ensure_lentils_npz`,
-    which returns its own split CSV.
-    """
-    if LOCAL_SPLITS_CSV is None:
-        raise FileNotFoundError(
-            "LENTILS_DATA_SOURCE='local' needs LENTILS_SPLITS_CSV set to a "
-            "(split, npz_path, image_id) CSV."
-        )
-    return LOCAL_SPLITS_CSV
-
-
-def subsample_splits_csv(csv_path: str | Path, n_per_split: int, out_path: str | Path) -> Path:
-    """Write a splits CSV keeping at most ``n_per_split`` rows per split (fast dry-runs).
-
-    Rows whose ``split`` is not one of train/val/test are dropped (e.g. ``adaclip_train``,
-    which the datamodule ignores anyway). Returns ``out_path``.
-    """
-    import csv as _csv
-    from collections import defaultdict
-
-    with open(csv_path, newline="") as f:
-        rows = list(_csv.DictReader(f))
-    if not rows:
-        raise ValueError(f"empty splits CSV: {csv_path}")
-    fields = list(rows[0].keys())
-    kept: list[dict[str, str]] = []
-    seen: dict[str, int] = defaultdict(int)
-    for r in rows:
-        s = r.get("split", "")
-        if s not in ("train", "val", "test"):
-            continue
-        if seen[s] < n_per_split:
-            kept.append(r)
-            seen[s] += 1
-    with open(out_path, "w", newline="") as f:
-        w = _csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        w.writerows(kept)
-    return Path(out_path)
-
-
-def ensure_lentils_npz(
-    out_dir: str | Path, *, limit: int = 0, splits_csv: str | Path | None = None
-) -> Path:
-    """Download the lentils cu3s + per-session COCO from HF, convert to per-frame NPZ.
-
-    Returns a splits CSV ``(split, npz_path, image_id)`` that ``MultiNpzDataModule`` reads.
-
-    Each per-session ``.cu3s`` is indexed by its **measurement index = ``local_image_id``**
-    (0..N-1), which is also the ``image_id`` in that session's sibling COCO (``json_path``). So we
-    read + label frames by ``local_image_id`` (``frame_index == image_id`` — no decoupling needed;
-    ``camera_frame_num`` is the original camera counter, not the cu3s index). Each cu3s is
-    downloaded once and its needed frames converted together.
-
-    Parameters
-    ----------
-    limit
-        If > 0, keep at most this many frames per split (fast dry-run).
-    splits_csv
-        Use this pre-filtered splits CSV instead of downloading the HF ``splits_dinomaly.csv``
-        (must carry ``cu3s_path, json_path, camera_frame_num, local_image_id, split``).
-    """
-    import csv as _csv
-    from collections import OrderedDict, defaultdict
-
-    from cuvis_ai_dataloader.data.npz_converter import convert_cu3s_file
-    from huggingface_hub import hf_hub_download
-
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    cache = str(LENTILS_HF_CACHE)
-
-    if splits_csv is None:
-        splits_csv = hf_hub_download(
-            LENTILS_HF_REPO_ID, repo_type="dataset", filename="splits_dinomaly.csv", cache_dir=cache
-        )
-    with open(splits_csv, newline="") as f:
-        rows = [r for r in _csv.DictReader(f) if r.get("split") in ("train", "val", "test")]
-
-    if limit:
-        seen: dict[str, int] = defaultdict(int)
-        kept = []
-        for r in rows:
-            s = r["split"]
-            if seen[s] < limit:
-                kept.append(r)
-                seen[s] += 1
-        rows = kept
-
-    groups: OrderedDict[str, list[dict]] = OrderedDict()
-    for r in rows:
-        groups.setdefault(r["cu3s_path"], []).append(r)
-
-    out_rows: list[dict[str, Any]] = []
-    for cu3s_rel, grp in groups.items():
-        json_rel = (grp[0].get("json_path") or "").strip()
-        cu3s = hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=cu3s_rel, cache_dir=cache)
-        # No sibling COCO -> convert without masks (loader emits zeros; frames read as normal).
-        coco = (
-            hf_hub_download(LENTILS_HF_REPO_ID, repo_type="dataset", filename=json_rel, cache_dir=cache)
-            if json_rel
-            else None
-        )
-        recs = convert_cu3s_file(
-            cu3s,
-            out_dir,
-            annotation_json=coco,
-            frame_indices=[int(r["local_image_id"]) for r in grp],
-        )
-        for r, rec in zip(grp, recs, strict=True):
-            out_rows.append({"split": r["split"], "npz_path": rec["npz_path"], "image_id": rec["image_id"]})
-
-    csv_out = out_dir / "lentils_splits_npz_fromhf.csv"
-    with open(csv_out, "w", newline="") as f:
-        w = _csv.DictWriter(f, fieldnames=["split", "npz_path", "image_id"])
-        w.writeheader()
-        w.writerows(out_rows)
-    return csv_out
-
-
 def load_lentils_frame(npz_path: str | Path) -> dict[str, np.ndarray]:
-    """Load a per-frame NPZ → ``{cube [H,W,C] f32, wavelengths [C] i32, mask [H,W] i32,
+    """Load a per-frame NPZ -> ``{cube [H,W,C] f32, wavelengths [C] i32, mask [H,W] i32,
     class_mask [H,W] u8}`` (mask/class_mask zeros when the frame is normal / unbaked)."""
     with np.load(npz_path) as z:
         cube = np.asarray(z["cube"], dtype=np.float32)
@@ -365,7 +272,7 @@ def per_class_pixel_auroc(scores: list[np.ndarray], class_masks: list[np.ndarray
                           categories: dict[int, str] | None = None) -> dict[str, float]:
     """One-vs-background pixel AUROC per non-background class (uses the baked ``class_mask``).
 
-    Pools **raw** scores across frames — AUROC is rank-based, so per-frame min-max normalization
+    Pools **raw** scores across frames -- AUROC is rank-based, so per-frame min-max normalization
     would not be monotonic across frames and would distort the pooled ranking.
     """
     from sklearn.metrics import roc_auc_score
@@ -390,7 +297,8 @@ def run_test_inference(pipeline: Any, datamodule: Any, *, device: Any, limit: in
     """Run a loaded pipeline over the ``test`` split; return one result dict per frame.
 
     Each dict: ``score_map`` [H,W] f32, ``anomaly_score`` float|None, ``mask`` [H,W] i32,
-    ``class_mask`` [H,W] u8, ``rgb`` [H,W,3] f32|None. Reuses the extraction helpers from
+    ``class_mask`` [H,W] u8, ``rgb`` [H,W,3] f32|None, plus the universe ``path`` / ``index`` of
+    the frame. Reuses the extraction helpers from
     ``examples/run_saved_dinomaly_pipeline_test_npz.py`` so the notebook path matches the CLI.
     The DINOv2 encoder runs under ``torch.no_grad()``.
     """
@@ -445,8 +353,8 @@ def run_test_inference(pipeline: Any, datamodule: Any, *, device: Any, limit: in
                 "mask": None if mask is None else np.asarray(mask, np.int32),
                 "class_mask": None if cmask is None else np.asarray(cmask, np.uint8),
                 "rgb": None if rgb is None else np.asarray(rgb, np.float32),
-                "npz_path": rec.get("npz_path") if isinstance(rec, dict) else None,
-                "image_id": rec.get("image_id") if isinstance(rec, dict) else None,
+                "path": rec.get("path") if isinstance(rec, dict) else None,
+                "index": rec.get("index") if isinstance(rec, dict) else None,
             })
         offset += bsz
     return results
