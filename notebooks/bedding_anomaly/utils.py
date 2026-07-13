@@ -1,10 +1,10 @@
 """Shared helpers for the bedding × Dinomaly tutorial notebooks.
 
-Three notebooks ride on these helpers:
+Two notebooks ride on these helpers:
 
 - ``bedding_all6_train_tutorial.ipynb`` — build + train + save the pipeline
-- ``bedding_all6_inference_tutorial.ipynb`` — load + run + speedup-recipe demo
-- ``bedding_all6_results_tutorial.ipynb`` — render headline + per-class plots
+- ``bedding_all6_inference_tutorial.ipynb`` — load + run + speedup-recipe demo,
+  plus the headline + per-class metric plots
 
 Design notes
 ------------
@@ -489,7 +489,7 @@ def load_headline_report(report_json_path: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Inference helpers — speedup recipe demo (mirrors verify_fast_inference_metrics)
+# Inference helpers: speedup recipe demo (TF32 + bf16 autocast + torch.compile)
 # ---------------------------------------------------------------------------
 
 def apply_lossless_speedups(pipeline, *, autocast_dtype: torch.dtype = torch.bfloat16,

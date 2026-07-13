@@ -140,8 +140,8 @@ def resolve_pipeline(pipeline_dir: str | Path = DEFAULT_PIPELINE_DIR) -> tuple[P
     yamls = sorted(d.glob("*.yaml"))
     if not yamls:
         raise FileNotFoundError(
-            f"No trained pipeline *.yaml in {d}. Run a train notebook first, or set "
-            f"LENTILS_PIPELINE_DIR to a trained_models dir."
+            f"No trained pipeline *.yaml in {d}. Run a train notebook first, or point "
+            f"PIPELINE_DIR (setup cell) at a trained_models dir."
         )
     yaml_path = yamls[0]
     pt_path = yaml_path.with_suffix(".pt")
