@@ -29,7 +29,9 @@ Data workflow (the selector split model)
 3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``), given the splits.json
    (``DataSplitConfig(splits_path=...)``) resolved over the ``universe_csv``.
 
-:func:`prepare_lentils_data` runs steps 1-2 and returns ``(splits_json, universe_csv)``.
+:func:`prepare_lentils_data` runs steps 1-2, prefers the dataset's published
+``splits/dinomaly.json`` (via :func:`fetch_lentils_splits_json`), and returns
+``(splits_json, universe_csv)``.
 """
 
 from __future__ import annotations
@@ -47,6 +49,8 @@ DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
 LENTILS_HF_REPO_ID = "cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils"
 #: PublicDatasets registry name / alias for the dataset (see cuvis-ai-core public_datasets).
 LENTILS_DATASET_NAME = "industrial_fod_lentils"
+#: The dataset's published baked split (a core DataSplitConfig, train-on-normals) on the Hub.
+LENTILS_SPLITS_FILE = "splits/dinomaly.json"
 
 #: Trained-pipeline dir the inference notebook reads by default (the RGB train notebook's output).
 #: Pass a different dir to :func:`resolve_pipeline` to evaluate a CIR / AdaCLIP-bands run.
@@ -56,8 +60,14 @@ DEFAULT_PIPELINE_DIR = (
 
 #: COCO category id -> name (per-day global COCO; 0 = background/unlabeled).
 LENTILS_CATEGORIES: dict[int, str] = {
-    0: "Unlabeled", 1: "stem_k", 2: "stone", 3: "alu_shard",
-    4: "blue_paper", 5: "white_paper", 6: "fly", 7: "rubber",
+    0: "Unlabeled",
+    1: "stem_k",
+    2: "stone",
+    3: "alu_shard",
+    4: "blue_paper",
+    5: "white_paper",
+    6: "fly",
+    7: "rubber",
 }
 
 #: The three cube-channel indices AdaCLIP's frozen concrete selector converged to on lentils.
@@ -82,19 +92,38 @@ def resolve_config() -> dict[str, Any]:
     return cfg
 
 
+def fetch_lentils_splits_json(filename: str = LENTILS_SPLITS_FILE) -> Path:
+    """Download the dataset's published split from HuggingFace Hub; return its local cache path.
+
+    ``splits/dinomaly.json`` is the reviewed, position-independent selector split (a core
+    ``DataSplitConfig``) published alongside the dataset; it resolves against either the raw cu3s
+    sessions or a converted NPZ universe (same ``(source, index)`` identity).
+    """
+    from huggingface_hub import hf_hub_download
+
+    return Path(hf_hub_download(LENTILS_HF_REPO_ID, filename, repo_type="dataset"))
+
+
 def prepare_lentils_data(
     npz_dir: str | Path,
     *,
     dataset_dir: str | Path | None = None,
     limit: int = 0,
+    use_published_splits: bool = True,
 ) -> tuple[Path, Path]:
     """Fetch the lentils cu3s dataset and materialize the NPZ + split artifacts.
 
     Downloads the dataset from HuggingFace (skipped when already on disk), then converts the
-    ``splits_dinomaly.csv`` frames to per-frame NPZ, emitting a baked ``splits.json`` and a
-    ``universe.csv`` (``source, index, path``). Returns ``(splits_json, universe_csv)``, ready
-    for ``MultiNpzDataModule(splits=DataSplitConfig(splits_path=splits_json),
-    universe_csv=universe_csv)``. Reruns reuse already-converted frames, so it is cheap to call.
+    ``splits_dinomaly.csv`` frames to per-frame NPZ, emitting a ``universe.csv`` (``source, index,
+    path``) and a ``splits.json``. When ``use_published_splits`` is set (and this is not a smoke
+    run), the dataset's **published** split (``splits/dinomaly.json`` on the Hub) is fetched and
+    written over the local ``splits.json``: it is the reviewed, position-independent selector split,
+    identical by construction to the regenerated one, and resolves against the ``universe.csv`` here
+    (same ``(source, index)`` identity). This pins the split to the published artifact rather than a
+    local regenerate, and falls back to the regenerated split when the Hub is unreachable. Returns
+    ``(splits_json, universe_csv)``, ready for
+    ``MultiNpzDataModule(splits=DataSplitConfig(splits_path=splits_json), universe_csv=universe_csv)``.
+    Reruns reuse already-converted frames, so it is cheap to call.
 
     Parameters
     ----------
@@ -103,8 +132,13 @@ def prepare_lentils_data(
     dataset_dir
         Where the raw cu3s dataset is downloaded (default: ``<repo>/../../data``).
     limit
-        If > 0, keep at most this many frames per split (fast dry-run).
+        If > 0, keep at most this many frames per split (fast dry-run); forces the locally
+        regenerated split, since the published split spans the full universe.
+    use_published_splits
+        Prefer the dataset's published ``splits/dinomaly.json`` over the regenerated one.
     """
+    import shutil
+
     from cuvis_ai_core.data.public_datasets import PublicDatasets
     from cuvis_ai_dataloader.data.npz_converter import convert_split_manifest
 
@@ -127,6 +161,17 @@ def prepare_lentils_data(
             limit=limit,
         )
         splits_json, universe_csv = result.splits_json, result.universe_csv
+
+    if use_published_splits and not limit:
+        try:
+            shutil.copyfile(fetch_lentils_splits_json(), splits_json)
+        except Exception as exc:  # offline / not yet published: keep the regenerated split
+            from loguru import logger
+
+            logger.warning(
+                f"Using the regenerated split {splits_json.name}; "
+                f"could not fetch the published split: {exc}"
+            )
     return splits_json, universe_csv
 
 
@@ -167,8 +212,13 @@ def build_selector(mode: str, *, name: str = "selector") -> Any:
         from cuvis_ai.node.channel_selector import CIRSelector
 
         sel = CIRSelector(
-            nir_nm=860.0, red_nm=670.0, green_nm=560.0, norm_mode="running",
-            running_warmup_frames=0, freeze_running_bounds_after_frames=20, name=name,
+            nir_nm=860.0,
+            red_nm=670.0,
+            green_nm=560.0,
+            norm_mode="running",
+            running_warmup_frames=0,
+            freeze_running_bounds_after_frames=20,
+            name=name,
         )
     else:
         raise NotImplementedError(
@@ -219,7 +269,8 @@ def load_lentils_frame(npz_path: str | Path) -> dict[str, np.ndarray]:
         h, w = cube.shape[0], cube.shape[1]
         mask = np.asarray(z["mask"], np.int32) if "mask" in z.files else np.zeros((h, w), np.int32)
         class_mask = (
-            np.asarray(z["class_mask"], np.uint8) if "class_mask" in z.files
+            np.asarray(z["class_mask"], np.uint8)
+            if "class_mask" in z.files
             else np.zeros((h, w), np.uint8)
         )
     return {"cube": cube, "wavelengths": wl, "mask": mask, "class_mask": class_mask}
@@ -232,15 +283,25 @@ def _norm(x: np.ndarray) -> np.ndarray:
     return np.zeros_like(x) if hi - lo < 1e-12 else np.clip((x - lo) / (hi - lo), 0, 1)
 
 
-def false_color(cube_hwc: np.ndarray, wavelengths: np.ndarray, targets_nm: tuple[float, float, float]) -> np.ndarray:
+def false_color(
+    cube_hwc: np.ndarray, wavelengths: np.ndarray, targets_nm: tuple[float, float, float]
+) -> np.ndarray:
     """Nearest-wavelength 3-channel false-color from a 61-ch cube (for display only)."""
     wl = np.asarray(wavelengths).ravel().astype(float)
     idx = [int(np.argmin(np.abs(wl - t))) for t in targets_nm]
     return _norm(cube_hwc[..., idx])
 
 
-def render_inference_panel(cube_hwc, score_map, *, wavelengths, gt_mask=None,
-                           targets_nm=(650.0, 550.0, 450.0), title=None, figsize=(16.0, 4.0)) -> Any:
+def render_inference_panel(
+    cube_hwc,
+    score_map,
+    *,
+    wavelengths,
+    gt_mask=None,
+    targets_nm=(650.0, 550.0, 450.0),
+    title=None,
+    figsize=(16.0, 4.0),
+) -> Any:
     """Per-frame story: false-color RGB, anomaly heatmap, and GT contour overlay."""
     if score_map.ndim == 4:
         score_map = score_map[0, ..., 0]
@@ -268,8 +329,11 @@ def render_inference_panel(cube_hwc, score_map, *, wavelengths, gt_mask=None,
     return fig
 
 
-def per_class_pixel_auroc(scores: list[np.ndarray], class_masks: list[np.ndarray],
-                          categories: dict[int, str] | None = None) -> dict[str, float]:
+def per_class_pixel_auroc(
+    scores: list[np.ndarray],
+    class_masks: list[np.ndarray],
+    categories: dict[int, str] | None = None,
+) -> dict[str, float]:
     """One-vs-background pixel AUROC per non-background class (uses the baked ``class_mask``).
 
     Pools **raw** scores across frames -- AUROC is rank-based, so per-frame min-max normalization
@@ -293,7 +357,9 @@ def per_class_pixel_auroc(scores: list[np.ndarray], class_masks: list[np.ndarray
     return out
 
 
-def run_test_inference(pipeline: Any, datamodule: Any, *, device: Any, limit: int = 0) -> list[dict[str, Any]]:
+def run_test_inference(
+    pipeline: Any, datamodule: Any, *, device: Any, limit: int = 0
+) -> list[dict[str, Any]]:
     """Run a loaded pipeline over the ``test`` split; return one result dict per frame.
 
     Each dict: ``score_map`` [H,W] f32, ``anomaly_score`` float|None, ``mask`` [H,W] i32,
@@ -347,15 +413,19 @@ def run_test_inference(pipeline: Any, datamodule: Any, *, device: Any, limit: in
             cmask = _sample_np(batch.get("class_mask"), i, expected_batch_size=bsz)
             rgb = _sample_np(sel.get("rgb_image"), i, expected_batch_size=bsz)
             rec = records[offset + i] if records is not None and offset + i < len(records) else {}
-            results.append({
-                "score_map": None if score is None else np.asarray(score, np.float32),
-                "anomaly_score": None if ascore is None else float(np.asarray(ascore).ravel()[0]),
-                "mask": None if mask is None else np.asarray(mask, np.int32),
-                "class_mask": None if cmask is None else np.asarray(cmask, np.uint8),
-                "rgb": None if rgb is None else np.asarray(rgb, np.float32),
-                "path": rec.get("path") if isinstance(rec, dict) else None,
-                "index": rec.get("index") if isinstance(rec, dict) else None,
-            })
+            results.append(
+                {
+                    "score_map": None if score is None else np.asarray(score, np.float32),
+                    "anomaly_score": None
+                    if ascore is None
+                    else float(np.asarray(ascore).ravel()[0]),
+                    "mask": None if mask is None else np.asarray(mask, np.int32),
+                    "class_mask": None if cmask is None else np.asarray(cmask, np.uint8),
+                    "rgb": None if rgb is None else np.asarray(rgb, np.float32),
+                    "path": rec.get("path") if isinstance(rec, dict) else None,
+                    "index": rec.get("index") if isinstance(rec, dict) else None,
+                }
+            )
         offset += bsz
     return results
 
@@ -376,7 +446,8 @@ def overall_auroc(results: list[dict[str, Any]]) -> dict[str, float]:
         px_y.append((r["mask"].ravel() != 0).astype(int))
         img_y.append(int((r["mask"] != 0).any()))
         img_s.append(
-            float(r["anomaly_score"]) if r.get("anomaly_score") is not None
+            float(r["anomaly_score"])
+            if r.get("anomaly_score") is not None
             else float(np.asarray(r["score_map"]).max())
         )
     out: dict[str, float] = {}
@@ -391,8 +462,9 @@ def overall_auroc(results: list[dict[str, Any]]) -> dict[str, float]:
     return out
 
 
-def plot_per_class_auroc_bar(per_class: dict[str, float], *, title="Per-class pixel AUROC",
-                             figsize=(10.0, 5.0)) -> Any:
+def plot_per_class_auroc_bar(
+    per_class: dict[str, float], *, title="Per-class pixel AUROC", figsize=(10.0, 5.0)
+) -> Any:
     if not per_class:
         return None
     names = sorted(per_class, key=per_class.get)
