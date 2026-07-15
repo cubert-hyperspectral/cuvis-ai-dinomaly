@@ -41,16 +41,17 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-from cuvis_ai_core.node.node import Node
-from cuvis_ai_schemas.enums import ExecutionStage, NodeCategory, NodeTag
+from cuvis_ai_schemas.enums import NodeCategory, NodeTag
 from cuvis_ai_schemas.execution import Context, Metric
 from cuvis_ai_schemas.pipeline import PortSpec
 from torchmetrics.classification import BinaryAUROC
 
+from cuvis_ai_dinomaly.node._binned_auroc import _StreamingBinnedAUROC
+
 Tensor = torch.Tensor
 
 
-class AnomalyAUROCMetrics(Node):
+class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
     """Streaming pixel/image AUROC via torchmetrics (val/test only).
 
     Input ports
@@ -92,25 +93,16 @@ class AnomalyAUROCMetrics(Node):
     }
 
     def __init__(self, thresholds: int = 200, **kwargs: Any) -> None:
-        self.thresholds = thresholds
-        name, execution_stages = Node.consume_base_kwargs(
-            kwargs, {ExecutionStage.VAL, ExecutionStage.TEST}
-        )
-        super().__init__(
-            name=name, execution_stages=execution_stages, thresholds=thresholds, **kwargs
-        )
+        super().__init__(thresholds=thresholds, **kwargs)
         # Histogram-based AUROC: O(thresholds) state, accumulated across batches and reset
         # only at the (stage, epoch) boundary, so each forward's value is a running AUROC.
         # The trainer mean-reduces these per epoch (monitoring) — see the module docstring.
         self.pixel_auroc = BinaryAUROC(thresholds=thresholds)
         self.image_auroc = BinaryAUROC(thresholds=thresholds)
-        self._last_key: tuple[ExecutionStage, int] | None = None
 
-    def reset(self) -> None:
-        """Reset both running accumulators (kept for explicit external use/tests)."""
+    def _reset_state(self) -> None:
         self.pixel_auroc.reset()
         self.image_auroc.reset()
-        self._last_key = None
 
     def forward(
         self,
@@ -120,21 +112,14 @@ class AnomalyAUROCMetrics(Node):
         context: Context,
     ) -> dict[str, Any]:
         # Reset on the (stage, epoch) boundary so each epoch accumulates fresh.
-        key = (context.stage, context.epoch)
-        if self._last_key != key:
-            self.pixel_auroc.reset()
-            self.image_auroc.reset()
-            self._last_key = key
+        self._reset_on_epoch_boundary(context)
 
         # Pixel-level: sigmoid -> [0, 1] for the binned metric (AUROC is rank-invariant).
-        pix_preds = torch.sigmoid(scores.squeeze(-1).flatten().float())
-        pix_tgts = targets.squeeze(-1).flatten().long()
-        self.pixel_auroc.update(pix_preds, pix_tgts)
+        self.pixel_auroc.update(self._binned_preds(scores), targets.squeeze(-1).flatten().long())
 
         # Image-level: per-image score vs "any GT pixel positive" label.
-        img_preds = torch.sigmoid(anomaly_score.float().flatten())
         img_tgts = targets.squeeze(-1).flatten(1).any(dim=1).long()
-        self.image_auroc.update(img_preds, img_tgts)
+        self.image_auroc.update(self._binned_preds(anomaly_score), img_tgts)
 
         return {
             "metrics": [
