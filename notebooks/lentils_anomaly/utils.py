@@ -329,6 +329,55 @@ def render_inference_panel(
     return fig
 
 
+def panel_frames(collected: list, datamodule: Any) -> list[dict[str, Any]]:
+    """Flatten a ``Predictor`` collect run into one slim record per frame for the panels.
+
+    Pulls the anomaly ``scores`` map, binary ``mask``, and per-frame ``anomaly_score`` out of each
+    per-batch ``(node, port)`` output dict (already moved to CPU by ``collect_ports``), plus the
+    frame's NPZ ``path`` / ``index`` from the predict dataset. The ground-truth cube for false-color
+    rendering is reloaded from that path by the caller; per-class AUROC comes from the metric node,
+    so neither the cube nor the multi-class mask is flattened here.
+    """
+
+    def _port(batch_out: dict, port: str) -> Any:
+        for (_node, name), value in batch_out.items():
+            if name == port and value is not None:
+                return value
+        return None
+
+    def _frame(x: Any, i: int) -> np.ndarray | None:
+        return None if x is None else x[i].detach().float().cpu().numpy()
+
+    records = getattr(datamodule.predict_ds, "records", None) or getattr(
+        datamodule.predict_ds, "_rows", None
+    )
+    frames: list[dict[str, Any]] = []
+    offset = 0
+    for batch_out in collected:
+        scores = _port(batch_out, "scores")
+        ascore = _port(batch_out, "anomaly_score")
+        mask = _port(batch_out, "mask")
+        bsz = int((scores if scores is not None else mask).shape[0])
+        for i in range(bsz):
+            rec = records[offset + i] if records is not None and offset + i < len(records) else {}
+            score = _frame(scores, i)
+            if score is not None and score.ndim == 3 and score.shape[-1] == 1:
+                score = score[..., 0]
+            m = _frame(mask, i)
+            frames.append(
+                {
+                    "score_map": None if score is None else score.astype(np.float32),
+                    "anomaly_score": None if ascore is None else float(ascore[i].item()),
+                    "mask": None if m is None else m.astype(np.int32),
+                    "path": rec.get("path") if isinstance(rec, dict) else None,
+                    "index": rec.get("index") if isinstance(rec, dict) else None,
+                    "is_anomalous": bool(m is not None and m.any()),
+                }
+            )
+        offset += bsz
+    return frames
+
+
 def per_class_pixel_auroc(
     scores: list[np.ndarray],
     class_masks: list[np.ndarray],
