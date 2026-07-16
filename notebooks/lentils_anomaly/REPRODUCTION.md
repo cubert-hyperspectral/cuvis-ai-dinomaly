@@ -50,11 +50,20 @@ The train-on-normals split is `splits_dinomaly.csv` on the HF dataset. Its train
 (636) convert to per-frame NPZ (grouped by cu3s; each session downloaded once). Simplest driver:
 
 ```python
-import utils  # notebooks/lentils_anomaly/utils.py
-splits_json, universe_csv = utils.prepare_lentils_data("<npz_out_dir>")  # HF download + convert
+from cuvis_ai_core.data.public_datasets import PublicDatasets
+from cuvis_ai_dataloader.data.npz_converter import convert_split_manifest
+
+data_dir = "<data_dir>"  # raw cu3s land here
+raw = f"{data_dir}/XMR_Industrial_Foreign_Object_Detection_Lentils"
+PublicDatasets.download_dataset("industrial_fod_lentils", download_path=data_dir, force=False)
+result = convert_split_manifest(
+    f"{raw}/splits_dinomaly.csv", raw, "<npz_out_dir>",
+    universe_csv="<npz_out_dir>/universe.csv", splits_json="<npz_out_dir>/splits.json",
+)
+splits_json, universe_csv = result.splits_json, result.universe_csv
 ```
 
-`prepare_lentils_data` writes a **`universe.csv`** (`source, index, path`) + a baked
+`convert_split_manifest` writes a **`universe.csv`** (`source, index, path`) + a baked
 **`splits.json`** (see *Data model* below), reused on rerun. Tip: convert one session per
 subprocess — the cuvis SDK aborts the *process* on session teardown *after* the files are written,
 so per-session isolation keeps a long convert resumable + lossless.
@@ -76,7 +85,7 @@ uv run --no-sync jupyter lab    # then open notebooks/lentils_anomaly/lentils_rg
 **3b. Or run the scripts (full-fidelity 20/50-epoch runs)**
 
 ```bash
-# 448px, 6 workers, AdamW, best-checkpoint. <UNIVERSE>/<SPLITS_JSON> = the prepare_lentils_data pair.
+# 448px, 6 workers, AdamW, best-checkpoint. <UNIVERSE>/<SPLITS_JSON> = the universe.csv / splits.json from the convert above.
 uv run python examples/train_dinomaly_rgb_multifile.py     data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/rgb     training.max_epochs=20
 uv run python examples/train_dinomaly_cir_multifile.py     data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/cir     training.max_epochs=20
 uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/adaclip training.max_epochs=20
@@ -121,9 +130,9 @@ two models stay directly comparable.
 
 ## Data model: `universe.csv` + `splits.json` (the selector split model)
 
-`prepare_lentils_data(npz_dir)` (in `utils.py`) downloads the cu3s dataset from HuggingFace (via
-`PublicDatasets`), converts the `splits_dinomaly.csv` frames to per-frame NPZ with
-cuvis-ai-dataloader's `convert_split_manifest`, and returns `(splits_json, universe_csv)`:
+The provisioning downloads the cu3s dataset from HuggingFace (via `PublicDatasets`), converts the
+`splits_dinomaly.csv` frames to per-frame NPZ with cuvis-ai-dataloader's `convert_split_manifest`,
+and yields `(splits_json, universe_csv)`:
 
 - **`universe.csv`** (`source, index, path`) is the sample universe: one row per frame, `source` the
   posix cu3s path, `index` the measurement index (`local_image_id`, also the COCO `image_id`), `path`

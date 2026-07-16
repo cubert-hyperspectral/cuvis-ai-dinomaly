@@ -29,9 +29,8 @@ Data workflow (the selector split model)
 3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``), given the splits.json
    (``DataSplitConfig(splits_path=...)``) resolved over the ``universe_csv``.
 
-:func:`prepare_lentils_data` runs steps 1-2, prefers the dataset's published
-``splits/dinomaly.json`` (via :func:`fetch_lentils_splits_json`), and returns
-``(splits_json, universe_csv)``.
+The notebooks run steps 1-2 directly with ``PublicDatasets.download_dataset`` +
+``convert_split_manifest``.
 """
 
 from __future__ import annotations
@@ -49,8 +48,6 @@ DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
 LENTILS_HF_REPO_ID = "cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils"
 #: PublicDatasets registry name / alias for the dataset (see cuvis-ai-core public_datasets).
 LENTILS_DATASET_NAME = "industrial_fod_lentils"
-#: The dataset's published baked split (a core DataSplitConfig, train-on-normals) on the Hub.
-LENTILS_SPLITS_FILE = "splits/dinomaly.json"
 
 #: Trained-pipeline dir the inference notebook reads by default (the RGB train notebook's output).
 #: Pass a different dir to :func:`resolve_pipeline` to evaluate a CIR / AdaCLIP-bands run.
@@ -90,89 +87,6 @@ def resolve_config() -> dict[str, Any]:
         f"cuvis-ai-dinomaly repo."
     )
     return cfg
-
-
-def fetch_lentils_splits_json(filename: str = LENTILS_SPLITS_FILE) -> Path:
-    """Download the dataset's published split from HuggingFace Hub; return its local cache path.
-
-    ``splits/dinomaly.json`` is the reviewed, position-independent selector split (a core
-    ``DataSplitConfig``) published alongside the dataset; it resolves against either the raw cu3s
-    sessions or a converted NPZ universe (same ``(source, index)`` identity).
-    """
-    from huggingface_hub import hf_hub_download
-
-    return Path(hf_hub_download(LENTILS_HF_REPO_ID, filename, repo_type="dataset"))
-
-
-def prepare_lentils_data(
-    npz_dir: str | Path,
-    *,
-    dataset_dir: str | Path | None = None,
-    limit: int = 0,
-    use_published_splits: bool = True,
-) -> tuple[Path, Path]:
-    """Fetch the lentils cu3s dataset and materialize the NPZ + split artifacts.
-
-    Downloads the dataset from HuggingFace (skipped when already on disk), then converts the
-    ``splits_dinomaly.csv`` frames to per-frame NPZ, emitting a ``universe.csv`` (``source, index,
-    path``) and a ``splits.json``. When ``use_published_splits`` is set (and this is not a smoke
-    run), the dataset's **published** split (``splits/dinomaly.json`` on the Hub) is fetched and
-    written over the local ``splits.json``: it is the reviewed, position-independent selector split,
-    identical by construction to the regenerated one, and resolves against the ``universe.csv`` here
-    (same ``(source, index)`` identity). This pins the split to the published artifact rather than a
-    local regenerate, and falls back to the regenerated split when the Hub is unreachable. Returns
-    ``(splits_json, universe_csv)``, ready for
-    ``MultiNpzDataModule(splits=DataSplitConfig(splits_path=splits_json), universe_csv=universe_csv)``.
-    Reruns reuse already-converted frames, so it is cheap to call.
-
-    Parameters
-    ----------
-    npz_dir
-        Where the per-frame NPZ + ``splits.json`` / ``universe.csv`` are written.
-    dataset_dir
-        Where the raw cu3s dataset is downloaded (default: ``<repo>/../../data``).
-    limit
-        If > 0, keep at most this many frames per split (fast dry-run); forces the locally
-        regenerated split, since the published split spans the full universe.
-    use_published_splits
-        Prefer the dataset's published ``splits/dinomaly.json`` over the regenerated one.
-    """
-    import shutil
-
-    from cuvis_ai_core.data.public_datasets import PublicDatasets
-    from cuvis_ai_dataloader.data.npz_converter import convert_split_manifest
-
-    npz_dir = Path(npz_dir)
-    splits_json = npz_dir / "splits.json"
-    universe_csv = npz_dir / "universe.csv"
-    dataset_dir = Path(dataset_dir) if dataset_dir else (REPO_ROOT / "data")
-    raw_dir = dataset_dir / "XMR_Industrial_Foreign_Object_Detection_Lentils"
-
-    if not (splits_json.is_file() and universe_csv.is_file()):
-        PublicDatasets.download_dataset(
-            LENTILS_DATASET_NAME, download_path=str(dataset_dir), force=False
-        )
-        result = convert_split_manifest(
-            raw_dir / "splits_dinomaly.csv",
-            raw_dir,
-            npz_dir,
-            universe_csv=universe_csv,
-            splits_json=splits_json,
-            limit=limit,
-        )
-        splits_json, universe_csv = result.splits_json, result.universe_csv
-
-    if use_published_splits and not limit:
-        try:
-            shutil.copyfile(fetch_lentils_splits_json(), splits_json)
-        except Exception as exc:  # offline / not yet published: keep the regenerated split
-            from loguru import logger
-
-            logger.warning(
-                f"Using the regenerated split {splits_json.name}; "
-                f"could not fetch the published split: {exc}"
-            )
-    return splits_json, universe_csv
 
 
 def resolve_pipeline(pipeline_dir: str | Path = DEFAULT_PIPELINE_DIR) -> tuple[Path, Path]:
