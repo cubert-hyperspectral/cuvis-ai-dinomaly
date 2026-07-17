@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## 0.4.1 - 2026-07-17
+
+- Raised the `cuvis-ai-core` floor to `>=0.11.2` and `cuvis-ai-schemas` to `>=0.8.0`, matching the
+  flat `TrainingConfig` the trainer already targets. Dependency floors only; no API change.
+
 ## 0.4.0 - 2026-07-01
 
 - **Moved the NPZ data layer to cuvis-ai-dataloader.** Deleted `cuvis_ai_dinomaly/data/`
