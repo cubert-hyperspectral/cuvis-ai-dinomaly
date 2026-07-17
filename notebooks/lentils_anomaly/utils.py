@@ -110,40 +110,6 @@ def resolve_pipeline(pipeline_dir: str | Path = DEFAULT_PIPELINE_DIR) -> tuple[P
 
 
 # --------------------------------------------------------------------------- selectors
-def build_selector(mode: str, *, name: str = "selector") -> Any:
-    """Return the channel-selector node for ``mode`` on the current dinomaly stack.
-
-    ``rgb`` -> FixedWavelengthSelector(650/550/450); ``cir`` -> CIRSelector(860/670/560). For the
-    AdaCLIP frozen bands, resolve wavelengths with :func:`resolve_adaclip_wavelengths` and build a
-    ``FixedWavelengthSelector`` directly (see the adaclip_bands train notebook).
-    """
-    mode = mode.lower()
-    if mode == "rgb":
-        from cuvis_ai.node.channel_selector import FixedWavelengthSelector
-
-        sel = FixedWavelengthSelector(target_wavelengths=(650.0, 550.0, 450.0), name=name)
-    elif mode == "cir":
-        from cuvis_ai.node.channel_selector import CIRSelector
-
-        sel = CIRSelector(
-            nir_nm=860.0,
-            red_nm=670.0,
-            green_nm=560.0,
-            norm_mode="running",
-            running_warmup_frames=0,
-            freeze_running_bounds_after_frames=20,
-            name=name,
-        )
-    else:
-        raise NotImplementedError(
-            f"selector mode {mode!r} not wired in this helper; use 'rgb' or 'cir'. For the "
-            f"AdaCLIP bands, resolve_adaclip_wavelengths(...) + FixedWavelengthSelector (see the "
-            f"adaclip_bands train notebook)."
-        )
-    sel._requires_initial_fit_override = False
-    return sel
-
-
 def resolve_adaclip_wavelengths(
     universe_csv: str | Path, indices: tuple[int, int, int] = ADACLIP_BAND_INDICES
 ) -> tuple[float, float, float]:

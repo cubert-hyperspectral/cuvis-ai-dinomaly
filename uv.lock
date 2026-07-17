@@ -540,7 +540,7 @@ wheels = [
 
 [[package]]
 name = "cuvis-ai-dataloader"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cuvis-ai-core" },
@@ -550,10 +550,11 @@ dependencies = [
     { name = "pillow" },
     { name = "pytorch-lightning" },
     { name = "torch" },
+    { name = "torchvision" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/e6/e89a3075bc86eff579c1ad02ea098b3f5bb7550ae309cd01ac2392a08f11/cuvis_ai_dataloader-0.3.0.tar.gz", hash = "sha256:181025da90eb0586ff637cbed895bdbe0754a6609018d02e9796876f98507ce6", size = 138892, upload-time = "2026-07-01T08:01:32.694Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/90/354e5c93e0d696c75854980d3e2a96a17a37d968f594a9354c5d6c7b3caa/cuvis_ai_dataloader-0.4.0.tar.gz", hash = "sha256:2b8c3234afa92f54972a6876d0b674c8123d7106cc520c75cc8b76f79c9f33a1", size = 162936, upload-time = "2026-07-15T12:49:25.526Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/d7/6b7efbab4317dd9068a86ea5d4e2441dd665d7338b173388fbf9256affdd/cuvis_ai_dataloader-0.3.0-py3-none-any.whl", hash = "sha256:f6f21edd6fae1a3ada68ad4a62a30d287c564bcecaf55ea75c4643452ee58b86", size = 41482, upload-time = "2026-07-01T08:01:31.491Z" },
+    { url = "https://files.pythonhosted.org/packages/93/ab/80981b76e00cceca8ac622d128e07fc3b54f0dbc4c81f7654dcd6016f0fa/cuvis_ai_dataloader-0.4.0-py3-none-any.whl", hash = "sha256:8eaf57f1d08363a2310700f0ecddf9e0c38558918ccd88ea366d4c2c7ded919c", size = 51956, upload-time = "2026-07-15T12:49:24.204Z" },
 ]
 
 [[package]]
@@ -594,7 +595,7 @@ requires-dist = [
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=1.7.5" },
     { name = "cuvis-ai", marker = "extra == 'examples'", specifier = ">=0.10.0" },
     { name = "cuvis-ai-core", specifier = ">=0.11.0" },
-    { name = "cuvis-ai-dataloader", marker = "extra == 'examples'", specifier = ">=0.3.0" },
+    { name = "cuvis-ai-dataloader", marker = "extra == 'examples'", specifier = ">=0.4.0" },
     { name = "cuvis-ai-schemas", specifier = ">=0.8.0" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.4.0" },
