@@ -15,6 +15,11 @@
 - **Brought the CIR, AdaCLIP-bands, and bedding train tutorials onto the RGB reference conventions.** Each now mirrors `lentils_rgb_train_tutorial.ipynb`: framework training via `restore_trainrun` + a flat `TrainRunConfig` (not hand-rolled `StatisticalTrainer`/`GradientTrainer`), a node-built preview video (`... -> MaskOverlayNode -> ToVideoNode`), the graph shown as a self-rendering bare `pipeline`, `AnomalyDataNode` in place of the deprecated `LentilsAnomalyDataNode`, INFO-level logging with a cuda/mps/cpu device fallback, a Colab bootstrap, and a per-node profiling pass; CIR/AdaCLIP swap only the front-end selector, AdaCLIP resolving its bands from the first NPZ. The inference tutorials were polished too: the lentils inference notebook reads its per-class AUROC off the node, and the bedding inference notebook was rewritten onto the same arc, loading the published pipeline (attaching the metric nodes it lacks plus `PerClassAnomalyAUROC`), running a `Predictor` pass over the val split, and reporting overall plus live 23-class per-class AUROC; this dropped the earlier single-frame walkthrough and the speedup-recipe section. Both use `uv` prerequisites and drop dead env-var/script references and em-dashes. The published `cubert-gmbh/dinomaly-bedding-all6` pipeline YAML was also re-pointed from the deprecated `LentilsAnomalyDataNode` to the canonical `AnomalyDataNode` (behaviorally identical alias; the data node holds no weights).
 - **Floored `cuvis-ai-dataloader>=0.4.0`** (was 0.3.0): 0.4.0 is the release whose `MultiNpzDataModule` emits the per-frame `class_mask` batch key `PerClassAnomalyAUROC` reads, so the per-class section no longer silently no-ops. Also dropped the dead `build_selector` helper from `notebooks/lentils_anomaly/utils.py` (the tutorials build their selectors inline).
 
+## 0.4.1 - 2026-07-17
+
+- Raised the `cuvis-ai-core` floor to `>=0.11.2` and `cuvis-ai-schemas` to `>=0.8.0`, matching the
+  flat `TrainingConfig` the trainer already targets. Dependency floors only; no API change.
+
 ## 0.4.0 - 2026-07-01
 
 - **Moved the NPZ data layer to cuvis-ai-dataloader.** Deleted `cuvis_ai_dinomaly/data/`
