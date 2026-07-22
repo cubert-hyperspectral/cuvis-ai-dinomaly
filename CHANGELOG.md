@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 - 2026-07-17
+## 0.5.0 - 2026-07-22
 
 - **Added `PerClassAnomalyAUROC`, a streaming one-vs-background per-class pixel AUROC node.** For each non-background class it accumulates a torchmetrics `BinaryAUROC` (histogram thresholds) over that class's pixels versus background, reusing the same binned primitive as `AnomalyAUROCMetrics` through a shared `_StreamingBinnedAUROC` base rather than reimplementing AUROC, and exposes the whole-run values via `.compute()` (read off the node like the pixel/image AUROC). Registered in `examples/plugins.yaml`. It consumes a `class_mask` port (the multi-class ground truth, new in `cuvis-ai` `AnomalyDataNode`), so a pipeline can compute per-class AUROC as a node instead of a notebook-side loop. The lentils inference tutorial now attaches it to the loaded pipeline and reads its §4 per-class AUROC off the node via `.compute()` (like the overall metrics), dropping the per-frame flatten loop; §2 keeps only a slim `utils.panel_frames` extraction for the qualitative panels.
 - **`DinomalyDetector` now declares a node `category` and `tags`** so it self-describes in the node catalog (metadata only, no behavior change).
