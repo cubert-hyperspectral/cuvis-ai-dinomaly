@@ -37,6 +37,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
 from cuvis_ai_core.utils.node_registry import NodeRegistry
@@ -185,7 +186,11 @@ def main() -> None:
         default=None,
         help="Plugin manifest (default: examples/plugins.yaml next to this file)",
     )
-    p.add_argument("--splits-csv", type=str, required=True)
+    # NPZ backend: --universe-csv (universe) + --splits-json (a core DataSplitConfig).
+    # CU3S backend: --splits-csv (cu3s_multi module-owned).
+    p.add_argument("--splits-csv", type=str, default=None)
+    p.add_argument("--universe-csv", type=str, default=None)
+    p.add_argument("--splits-json", type=str, default=None)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--num-workers", type=int, default=0)
@@ -209,12 +214,17 @@ def main() -> None:
     if not plugins_path.is_file():
         raise FileNotFoundError(plugins_path)
 
-    splits_path = Path(args.splits_csv)
-    if not splits_path.is_file():
-        raise FileNotFoundError(splits_path)
-
-    header = splits_path.open(encoding="utf-8").readline()
-    backend = "npz" if "npz_path" in header else "cu3s"
+    backend = "npz" if args.universe_csv else "cu3s"
+    if backend == "npz":
+        if not args.splits_json:
+            raise ValueError("--universe-csv (npz backend) also requires --splits-json.")
+        if not Path(args.universe_csv).is_file():
+            raise FileNotFoundError(args.universe_csv)
+    else:
+        if not args.splits_csv:
+            raise ValueError("provide --universe-csv + --splits-json (npz) or --splits-csv (cu3s).")
+        if not Path(args.splits_csv).is_file():
+            raise FileNotFoundError(args.splits_csv)
 
     out_dir = args.output_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -236,18 +246,20 @@ def main() -> None:
     pipeline.torch_layers.eval()
 
     common = {
-        "splits_csv": str(splits_path),
         "batch_size": args.batch_size,
         "num_workers": args.num_workers,
     }
     if backend == "npz":
         datamodule = MultiNpzDataModule(
+            universe_csv=str(args.universe_csv),
+            splits=load_splits(args.splits_json),
             **common,
             pin_memory=device.type == "cuda",
             persistent_workers=False,
         )
     else:
         datamodule = MultiCu3sDataModule(
+            splits_csv=str(args.splits_csv),
             **common,
             processing_mode=args.processing_mode,
         )
@@ -257,7 +269,15 @@ def main() -> None:
         raise RuntimeError("No test split in splits CSV (or test_ds empty).")
 
     loader = datamodule.test_dataloader()
-    records = datamodule.test_ds.records
+    # Upstream MultiNpzDataModule exposes per-frame rows as `_rows` (this script predates the
+    # move and used the local datamodule's `.records`); support both.
+    records = getattr(datamodule.test_ds, "records", None)
+    if records is None:
+        records = getattr(datamodule.test_ds, "_rows", None)
+    if records is None:
+        raise RuntimeError(
+            f"{type(datamodule.test_ds).__name__} exposes neither .records nor ._rows"
+        )
     manifest_path = out_dir / "manifest.jsonl"
 
     n_test = len(datamodule.test_ds)
@@ -297,7 +317,7 @@ def main() -> None:
                 rec = records[ds_idx]
 
                 if backend == "npz":
-                    frame_path = str(rec["npz_path"])
+                    frame_path = str(rec["path"])
                     path_key = "source_npz_path"
                 else:
                     frame_path = str(rec["cu3s_path"])
@@ -372,7 +392,7 @@ def main() -> None:
     summary: dict[str, object] = {
         "n_frames": int(global_offset),
         "backend": backend,
-        "splits_csv": str(splits_path),
+        "splits": str(args.universe_csv or args.splits_csv),
         "pipeline_yaml": str(yaml_path),
         "pipeline_pt": str(pt_path),
         "node_metrics_mean_over_frames": {

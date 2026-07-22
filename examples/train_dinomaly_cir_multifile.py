@@ -4,7 +4,7 @@ Same graph pattern as ``train_dinomaly_rgb_multifile.py`` but uses :class:`CIRSe
 
 Usage (from cuvis-ai-dinomaly repo root):
     uv run python examples/train_dinomaly_cir_multifile.py
-    uv run python examples/train_dinomaly_cir_multifile.py data.splits_csv=lentils_splits.csv
+    uv run python examples/train_dinomaly_cir_multifile.py data.universe_csv=universe.csv data.splits_json=splits.json
 """
 
 from __future__ import annotations

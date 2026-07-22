@@ -5,14 +5,14 @@ Wires :class:`DinomalyTrainLossBridge` in the pipeline graph and passes it to
 
 Usage (from cuvis-ai-dinomaly repo root):
     uv run python examples/train_dinomaly_rgb_multifile.py
-    uv run python examples/train_dinomaly_rgb_multifile.py data.splits_csv=lentils_splits.csv
+    uv run python examples/train_dinomaly_rgb_multifile.py data.universe_csv=universe.csv data.splits_json=splits.json
     uv run python examples/train_dinomaly_rgb_multifile.py dinomaly.use_center_crop=false
 
 Full 50-epoch NPZ run (best-ckpt val/test + export), mirroring CIR workflow:
     uv run python examples/train_dinomaly_rgb_multifile.py \
       output_dir=/mnt/data/cuvis_ai_outputs/dinomaly_rgb_npz_50ep_w0 \
-      training.trainer.max_epochs=50 \
-      data.splits_csv=/home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_full.csv \
+      training.max_epochs=50 \
+      data.universe_csv=<out>/universe.csv data.splits_json=<out>/splits.json \
       data.num_workers=0 data.persistent_workers=false \
       eval_mode=best
 """

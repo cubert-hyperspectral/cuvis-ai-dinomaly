@@ -1,10 +1,10 @@
 """Shared helpers for the bedding × Dinomaly tutorial notebooks.
 
-Three notebooks ride on these helpers:
+Two notebooks ride on these helpers:
 
 - ``bedding_all6_train_tutorial.ipynb`` — build + train + save the pipeline
-- ``bedding_all6_inference_tutorial.ipynb`` — load + run + speedup-recipe demo
-- ``bedding_all6_results_tutorial.ipynb`` — render headline + per-class plots
+- ``bedding_all6_inference_tutorial.ipynb`` — load + run + speedup-recipe demo,
+  plus the headline + per-class metric plots
 
 Design notes
 ------------
@@ -56,9 +56,44 @@ BEDDING_ALL6_NM: tuple[float, ...] = (625.0, 550.0, 450.0, 1450.0, 1200.0, 1050.
 
 #: Human-readable channel labels matching ``BEDDING_ALL6_NM``.
 BEDDING_ALL6_LABELS: tuple[str, ...] = (
-    "VIS R (625 nm)", "VIS G (550 nm)", "VIS B (450 nm)",
-    "SWIR R (1450 nm)", "SWIR G (1200 nm)", "SWIR B (1050 nm)",
+    "VIS R (625 nm)",
+    "VIS G (550 nm)",
+    "VIS B (450 nm)",
+    "SWIR R (1450 nm)",
+    "SWIR G (1200 nm)",
+    "SWIR B (1050 nm)",
 )
+
+#: Category-id -> name map for the bedding foreign-object classes (0 = background),
+#: mirroring the dataset's ``class_map.json``. The per-pixel ``class_mask`` the data module
+#: emits carries these ids; ``PerClassAnomalyAUROC`` uses this map to label its one-vs-background
+#: per-class scores. ``PLA_blacK_4mm`` keeps the dataset's own capitalisation.
+BEDDING_CATEGORIES: dict[int, str] = {
+    0: "background",
+    1: "water",
+    2: "alcohol",
+    3: "POMC",
+    4: "PET",
+    5: "leaf",
+    6: "fake_leaf",
+    7: "PLA_black_1mm",
+    8: "PLA_black_2mm",
+    9: "PLA_blacK_4mm",
+    10: "PLA_black_8mm",
+    11: "PLA_black_16mm",
+    12: "PLA_blue_1mm",
+    13: "PLA_blue_2mm",
+    14: "PLA_blue_4mm",
+    15: "PLA_blue_8mm",
+    16: "PLA_blue_16mm",
+    17: "PLA_white_1mm",
+    18: "PLA_white_2mm",
+    19: "PLA_white_4mm",
+    20: "PLA_white_8mm",
+    21: "PLA_white_16mm",
+    22: "transparent_plastic",
+    23: "water&alcohol-tray",
+}
 
 #: Repo root, auto-detected from this file's location
 #: (``<repo>/notebooks/bedding_anomaly/utils.py`` → ``parents[2]``). Everything
@@ -73,7 +108,11 @@ BEDDING_HF_REPO_ID = "cubert-gmbh/X4_SWIR_Industrial_Foreign_Object_Detection_Be
 #: Published trained *model* (pipeline YAML/PT + eval JSON):
 #: https://huggingface.co/cubert-gmbh/dinomaly-bedding-all6
 BEDDING_MODEL_HF_REPO = "cubert-gmbh/dinomaly-bedding-all6"
-BEDDING_HF_CACHE = Path.home() / ".cache" / "cuvis_bedding"
+#: Where HF downloads (dataset cu3s + the ~580 MB model) are cached. Defaults under the home
+#: ``.cache``; override with ``BEDDING_HF_CACHE`` to redirect the large cu3s cache off a full drive.
+BEDDING_HF_CACHE = Path(
+    os.environ.get("BEDDING_HF_CACHE", str(Path.home() / ".cache" / "cuvis_bedding"))
+)
 
 # --- Data source toggle (where dataset cu3s/masks/splits come from) --------
 #: "hf" (default) downloads from BEDDING_HF_REPO_ID and caches under
@@ -94,7 +133,14 @@ BEDDING_PIPELINE_SOURCE = os.environ.get("BEDDING_PIPELINE_SOURCE", "hf").lower(
 LOCAL_PIPELINE_DIR = Path(
     os.environ.get(
         "BEDDING_PIPELINE_DIR",
-        str(REPO_ROOT / "notebooks" / "bedding_anomaly" / "outputs" / "trained_run" / "trained_models"),
+        str(
+            REPO_ROOT
+            / "notebooks"
+            / "bedding_anomaly"
+            / "outputs"
+            / "trained_run"
+            / "trained_models"
+        ),
     )
 )
 
@@ -154,6 +200,7 @@ def resolve_default_config() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Trained-pipeline + eval resolution (HuggingFace model repo, or local-trained)
 # ---------------------------------------------------------------------------
+
 
 def _hf_model_download(filename: str) -> Path:
     """Download ``filename`` from the HF *model* repo, cached, return its path."""
@@ -224,6 +271,7 @@ def resolve_eval_dir() -> Path | None:
 # ---------------------------------------------------------------------------
 # Data loaders — HuggingFace by default, local mount via BEDDING_DATA_SOURCE
 # ---------------------------------------------------------------------------
+
 
 def center_crop_to_training(arr: np.ndarray) -> np.ndarray:
     """Center-crop a native ``2400×4900`` array to the ``1800×4300`` training crop.
@@ -334,9 +382,112 @@ def load_bedding_cube(frame_stem: str, *, split: str = "val") -> tuple[np.ndarra
     return center_crop_to_training(cube), wavelengths
 
 
+def prepare_bedding_data(
+    npz_dir: str | Path,
+    *,
+    splits: tuple[str, ...] = ("val",),
+    limit: int = 0,
+) -> tuple[Path, Path]:
+    """Materialize per-frame NPZ + split artifacts for the requested bedding split(s).
+
+    Factors the training tutorial's cu3s -> cropped-NPZ conversion into a reusable helper. For each
+    frame of the dataset ``splits.csv`` whose split is in ``splits`` it loads the cu3s cube
+    (downloaded from HuggingFace in the default mode and center-cropped 2400x4900 -> 1800x4300 to
+    match the pretrained pipeline), pairs it with its GT mask (rasterized into a binary ``mask`` and
+    a multi-class ``class_mask``; zeros for a normal frame), and writes one compressed ``.npz``. It
+    then emits the two artifacts the data module consumes: a ``universe.csv`` (``source, index,
+    path``; one measurement per file, so ``index`` is always 0) and a baked ``splits.json`` (core
+    ``DataSplitConfig`` of ``file_indices`` selectors, ``predict`` mapped to ``val``). Reruns reuse
+    the artifacts when both already exist under ``npz_dir``. Returns ``(splits_json, universe_csv)``,
+    ready for ``MultiNpzDataModule(splits=DataSplitConfig(splits_path=splits_json),
+    universe_csv=universe_csv)``.
+
+    Parameters
+    ----------
+    npz_dir
+        Where per-frame NPZ (HF mode) and the ``splits.json`` / ``universe.csv`` are written.
+    splits
+        Dataset splits to convert. Inference needs only ``("val",)`` (the predict split); the
+        training tutorial converts ``("train", "val")``.
+    limit
+        If > 0, keep at most this many frames per split (fast dry-run).
+    """
+    import csv
+
+    from cuvis_ai_core.data.splits_io import save_splits
+    from cuvis_ai_dataloader.data.npz_converter import write_universe_csv
+    from cuvis_ai_schemas.training import DataSplitConfig, Selector, SelectorKind
+    from PIL import Image
+
+    cfg = resolve_default_config()
+    npz_out = Path(npz_dir)
+    npz_out.mkdir(parents=True, exist_ok=True)
+    universe_csv = npz_out / "universe.csv"
+    splits_json = npz_out / "splits.json"
+
+    # (split, source_stem, absolute_npz_path) for every converted / indexed frame.
+    frames: list[tuple[str, str, Path]] = []
+
+    if cfg["data_source"] == "local":
+        for r in csv.DictReader(open(cfg["splits_csv"])):
+            if r["split"] not in splits:
+                continue
+            p = Path(r["npz_path"])
+            frames.append((r["split"], p.stem, p.resolve()))
+    elif not (universe_csv.is_file() and splits_json.is_file()):
+        dataset_splits = load_bedding_splits()  # HF splits.csv (split, stem, ...)
+        per_split_count: dict[str, int] = {}
+        for _, row in dataset_splits.iterrows():
+            split, stem = row["split"], row["stem"]
+            if split not in splits:
+                continue
+            if limit and per_split_count.get(split, 0) >= limit:
+                continue
+            per_split_count[split] = per_split_count.get(split, 0) + 1
+            cube, wl = load_bedding_cube(stem, split=split)  # cropped (1800, 4300, 6) float32
+            mask_path = load_bedding_mask_path(stem)
+            if mask_path is not None:
+                m = center_crop_to_training(np.asarray(Image.open(mask_path)))
+                mask = (m > 0).astype(np.int32)
+                class_mask = m.astype(np.uint8)
+            else:  # normal frame: empty mask
+                mask = np.zeros(cube.shape[:2], dtype=np.int32)
+                class_mask = np.zeros(cube.shape[:2], dtype=np.uint8)
+            out = npz_out / split / f"{stem}.npz"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                out, cube=cube, wavelengths=wl.astype(np.int32), mask=mask, class_mask=class_mask
+            )
+            frames.append((split, stem, out.resolve()))
+
+    # Emit the two split artifacts (skipped implicitly when nothing new was converted and both
+    # already exist): a universe.csv and a baked splits.json with predict mapped to val.
+    if frames:
+        write_universe_csv(
+            [{"source": stem, "index": 0, "path": path.as_posix()} for _s, stem, path in frames],
+            universe_csv,
+        )
+
+        def _selectors(split: str) -> list[Selector]:
+            return [
+                Selector(kind=SelectorKind.FILE_INDICES, source=stem, ids=[0])
+                for s, stem, _ in frames
+                if s == split
+            ]
+
+        save_splits(
+            DataSplitConfig(
+                train=_selectors("train"), val=_selectors("val"), predict=_selectors("val")
+            ),
+            splits_json,
+        )
+    return splits_json, universe_csv
+
+
 # ---------------------------------------------------------------------------
 # 6-channel visualisation helpers
 # ---------------------------------------------------------------------------
+
 
 def split_cube_vis_swir(cube_bhwc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Split a 6-channel cube ``[B, H, W, 6]`` into VIS (R/G/B at 625/550/450 nm)
@@ -349,8 +500,9 @@ def split_cube_vis_swir(cube_bhwc: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Both outputs are returned in ``[H, W, 3]`` shape (batch dim squeezed for
     visualisation; if B>1 only the first item is used).
     """
-    assert cube_bhwc.ndim == 4 and cube_bhwc.shape[-1] == 6, \
+    assert cube_bhwc.ndim == 4 and cube_bhwc.shape[-1] == 6, (
         f"expected [B,H,W,6] cube, got {cube_bhwc.shape}"
+    )
     vis = cube_bhwc[0, ..., :3]
     swir = cube_bhwc[0, ..., 3:]
     return vis, swir
@@ -453,31 +605,105 @@ def render_inference_panel(
 # Headline + per-class plotting helpers (used by the results notebook)
 # ---------------------------------------------------------------------------
 
+
+def load_bedding_frame(npz_path: str | Path) -> dict[str, np.ndarray]:
+    """Load a per-frame bedding NPZ -> ``{cube [H,W,6] f32, wavelengths [C] i32, mask [H,W] i32,
+    class_mask [H,W] u8}`` (mask / class_mask zeros when the frame is normal / unbaked)."""
+    with np.load(npz_path) as z:
+        cube = np.asarray(z["cube"], dtype=np.float32)
+        wl = np.asarray(z["wavelengths"]).ravel().astype(np.int32, copy=False)
+        h, w = cube.shape[0], cube.shape[1]
+        mask = np.asarray(z["mask"], np.int32) if "mask" in z.files else np.zeros((h, w), np.int32)
+        class_mask = (
+            np.asarray(z["class_mask"], np.uint8)
+            if "class_mask" in z.files
+            else np.zeros((h, w), np.uint8)
+        )
+    return {"cube": cube, "wavelengths": wl, "mask": mask, "class_mask": class_mask}
+
+
+def panel_frames(collected: list, datamodule: Any) -> list[dict[str, Any]]:
+    """Flatten a ``Predictor`` collect run into one slim record per frame for the panels.
+
+    Pulls the anomaly ``scores`` map, binary ``mask``, and per-frame ``anomaly_score`` out of each
+    per-batch ``(node, port)`` output dict (already moved to CPU by ``collect_ports``), plus the
+    frame's NPZ ``path`` / ``index`` from the predict dataset. The cube for the VIS / SWIR panels is
+    reloaded from that path by the caller (``load_bedding_frame``); per-class AUROC comes from the
+    metric node, so neither the cube nor the multi-class mask is flattened here.
+    """
+
+    def _port(batch_out: dict, port: str) -> Any:
+        for (_node, name), value in batch_out.items():
+            if name == port and value is not None:
+                return value
+        return None
+
+    def _frame(x: Any, i: int) -> np.ndarray | None:
+        return None if x is None else x[i].detach().float().cpu().numpy()
+
+    records = getattr(datamodule.predict_ds, "records", None) or getattr(
+        datamodule.predict_ds, "_rows", None
+    )
+    frames: list[dict[str, Any]] = []
+    offset = 0
+    for batch_out in collected:
+        scores = _port(batch_out, "scores")
+        ascore = _port(batch_out, "anomaly_score")
+        mask = _port(batch_out, "mask")
+        bsz = int((scores if scores is not None else mask).shape[0])
+        for i in range(bsz):
+            rec = records[offset + i] if records is not None and offset + i < len(records) else {}
+            score = _frame(scores, i)
+            if score is not None and score.ndim == 3 and score.shape[-1] == 1:
+                score = score[..., 0]
+            m = _frame(mask, i)
+            frames.append(
+                {
+                    "score_map": None if score is None else score.astype(np.float32),
+                    "anomaly_score": None if ascore is None else float(ascore[i].item()),
+                    "mask": None if m is None else m.astype(np.int32),
+                    "path": rec.get("path") if isinstance(rec, dict) else None,
+                    "index": rec.get("index") if isinstance(rec, dict) else None,
+                    "is_anomalous": bool(m is not None and m.any()),
+                }
+            )
+        offset += bsz
+    return frames
+
+
 def plot_per_class_auroc_bar(
-    per_class_json_path: Path,
+    per_class: dict[str, float] | str | Path,
     *,
-    title: str = "Per-class pixel AUROC (EAD methodology)",
+    title: str = "Per-class pixel AUROC",
     figsize: tuple[float, float] = (12.0, 6.0),
 ):
-    """Render a horizontal bar chart of per-class AUROC from a recomputed json."""
+    """Render a horizontal bar chart of per-class AUROC, ascending.
+
+    Accepts either a ``{class_name: auroc}`` dict (as returned by
+    ``PerClassAnomalyAUROC.compute()``) or a path to a recomputed per-class json (the published
+    ``eval_val/per_class_auroc.json``, whose values may be nested under an ``auroc`` key).
+    """
     import json
-    data = json.loads(Path(per_class_json_path).read_text())
-    items = data["per_class_auroc"] if "per_class_auroc" in data else data
-    names = list(items.keys())
-    aurocs = [items[n]["auroc"] if isinstance(items[n], dict) else items[n] for n in names]
-    order = np.argsort(aurocs)
-    names_sorted = [names[i] for i in order]
-    aurocs_sorted = [aurocs[i] for i in order]
+
+    if isinstance(per_class, (str, Path)):
+        data = json.loads(Path(per_class).read_text())
+        items = data["per_class_auroc"] if "per_class_auroc" in data else data
+        per_class = {n: (v["auroc"] if isinstance(v, dict) else v) for n, v in items.items()}
+    if not per_class:
+        return None
+    names = sorted(per_class, key=per_class.get)
+    aurocs = [per_class[n] for n in names]
 
     fig, ax = plt.subplots(figsize=figsize)
-    bars = ax.barh(names_sorted, aurocs_sorted, color="steelblue")
+    bars = ax.barh(names, aurocs, color="steelblue")
     ax.set_xlim(0.5, 1.01)
     ax.axvline(1.0, color="black", linewidth=0.5)
     ax.set_xlabel("Pixel AUROC")
     ax.set_title(title)
-    for bar, val in zip(bars, aurocs_sorted):
-        ax.text(val + 0.005, bar.get_y() + bar.get_height() / 2,
-                f"{val:.3f}", va="center", fontsize=8)
+    for bar, val in zip(bars, aurocs, strict=True):
+        ax.text(
+            val + 0.005, bar.get_y() + bar.get_height() / 2, f"{val:.3f}", va="center", fontsize=8
+        )
     fig.tight_layout()
     return fig
 
@@ -485,15 +711,18 @@ def plot_per_class_auroc_bar(
 def load_headline_report(report_json_path: Path) -> dict[str, Any]:
     """Load eval_val/report.json. Used by the results notebook header."""
     import json
+
     return json.loads(Path(report_json_path).read_text())
 
 
 # ---------------------------------------------------------------------------
-# Inference helpers — speedup recipe demo (mirrors verify_fast_inference_metrics)
+# Inference helpers: speedup recipe demo (TF32 + bf16 autocast + torch.compile)
 # ---------------------------------------------------------------------------
 
-def apply_lossless_speedups(pipeline, *, autocast_dtype: torch.dtype = torch.bfloat16,
-                            compile_mode: str = "reduce-overhead"):
+
+def apply_lossless_speedups(
+    pipeline, *, autocast_dtype: torch.dtype = torch.bfloat16, compile_mode: str = "reduce-overhead"
+):
     """Enable TF32 + bf16 autocast + ``torch.compile`` on the underlying model.
 
     Returns the matching ``torch.autocast`` context manager. Callers should run

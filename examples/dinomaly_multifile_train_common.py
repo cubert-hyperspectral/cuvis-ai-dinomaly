@@ -9,12 +9,13 @@ from typing import Literal
 
 import pytorch_lightning as pl
 import torch
-from cuvis_ai.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.channel_selector import CIRSelector, FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
+from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
+from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.training.config import create_callbacks_from_config
@@ -102,31 +103,17 @@ def run_dinomaly_multifile_training(
     output_dir = Path(cfg.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Infer datalake backend:
-    # - CU3S: splits CSV without an `npz_path` column
-    # - NPZ:  splits CSV includes an `npz_path` column
-    #
-    # We intentionally avoid requiring a `data.backend` config key to keep Hydra schemas unchanged.
-    backend_cfg = cfg.data.get("backend", None)
-    if backend_cfg is None:
-        splits_csv_path = Path(cfg.data.splits_csv)
-        backend = "cu3s"
-        if splits_csv_path.is_file():
-            try:
-                header = splits_csv_path.open(encoding="utf-8").readline()
-                if "npz_path" in header:
-                    backend = "npz"
-            except Exception:
-                backend = "cu3s"
-    else:
-        backend = str(backend_cfg).lower()
+    # Pick the datalake backend from the config keys present:
+    # - NPZ:  `data.universe_csv` (universe) + `data.splits_json` (a core DataSplitConfig).
+    # - CU3S: `data.splits_csv` (the cu3s_multi module-owned split CSV).
     common_loader_kwargs = {
-        "splits_csv": cfg.data.splits_csv,
         "batch_size": cfg.data.batch_size,
         "num_workers": int(cfg.data.get("num_workers", 0)),
     }
-    if backend == "npz":
+    if cfg.data.get("universe_csv", None):
         datamodule = MultiNpzDataModule(
+            universe_csv=cfg.data.universe_csv,
+            splits=load_splits(cfg.data.splits_json),
             **common_loader_kwargs,
             pin_memory=bool(cfg.data.get("pin_memory", True)),
             persistent_workers=bool(cfg.data.get("persistent_workers", True)),
@@ -136,6 +123,7 @@ def run_dinomaly_multifile_training(
         )
     else:
         datamodule = MultiCu3sDataModule(
+            splits_csv=cfg.data.splits_csv,
             **common_loader_kwargs,
             processing_mode=cfg.data.processing_mode,
         )
@@ -156,7 +144,7 @@ def run_dinomaly_multifile_training(
             target_wavelengths=(650.0, 550.0, 450.0),
             name="rgb_selector",
         )
-    else:
+    elif band_mode == "cir":
         selector = CIRSelector(
             nir_nm=860.0,
             red_nm=670.0,
@@ -165,6 +153,15 @@ def run_dinomaly_multifile_training(
             running_warmup_frames=0,
             freeze_running_bounds_after_frames=20,
             name="cir_selector",
+        )
+    else:
+        # Fail loudly instead of silently building a CIR selector. This shared trainer only
+        # wires the fixed RGB / CIR selectors; the learnable Concrete selector needs a different
+        # graph (extra selection_weights -> distinctness-loss edge, two loss nodes), so it lives
+        # in the standalone examples/train_dinomaly_concrete_joint_multifile.py.
+        raise ValueError(
+            f"band_mode must be 'rgb' or 'cir', got {band_mode!r}. For the Concrete band "
+            f"selector use examples/train_dinomaly_concrete_joint_multifile.py."
         )
     selector._requires_initial_fit_override = False
 
@@ -198,20 +195,25 @@ def run_dinomaly_multifile_training(
         (metrics_node.metrics, tb.metrics),
     )
 
-    pipeline.visualize(
-        format="render_graphviz",
-        output_path=str(output_dir / "pipeline" / f"{pipeline.name}.png"),
-        show_execution_stage=True,
-    )
+    try:
+        pipeline.visualize(
+            format="render_graphviz",
+            output_path=str(output_dir / "pipeline" / f"{pipeline.name}.png"),
+            show_execution_stage=True,
+        )
+    except Exception as exc:  # graphviz 'dot' not installed etc. — the pipeline PNG is optional.
+        logger.warning(
+            "Skipping pipeline visualization ({}); install graphviz for the diagram.", exc
+        )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Moving pipeline to device: %s", device)
     pipeline.to(device)
 
     training_cfg = TrainingConfig.from_dict(OmegaConf.to_container(cfg.training, resolve=True))
-    if training_cfg.trainer.callbacks is None:
-        training_cfg.trainer.callbacks = CallbacksConfig()
-    training_cfg.trainer.callbacks.checkpoint = ModelCheckpointConfig(
+    if training_cfg.callbacks is None:
+        training_cfg.callbacks = CallbacksConfig()
+    training_cfg.callbacks.checkpoint = ModelCheckpointConfig(
         dirpath=str(output_dir / "checkpoints"),
         monitor="metrics_anomaly/iou",
         mode="max",
@@ -249,7 +251,7 @@ def run_dinomaly_multifile_training(
     merged_callbacks: list | None = None
     if extra_callbacks:
         merged_callbacks = (
-            list(create_callbacks_from_config(training_cfg.trainer.callbacks)) + extra_callbacks
+            list(create_callbacks_from_config(training_cfg.callbacks)) + extra_callbacks
         )
 
     logger.info("Gradient training (Dinomaly bottleneck + decoder)...")
@@ -258,8 +260,7 @@ def run_dinomaly_multifile_training(
         datamodule=datamodule,
         loss_nodes=[loss_bridge],
         metric_nodes=[metrics_node],
-        trainer_config=training_cfg.trainer,
-        optimizer_config=training_cfg.optimizer,
+        training_config=training_cfg,
         monitors=[tb],
         callbacks=merged_callbacks,
     )

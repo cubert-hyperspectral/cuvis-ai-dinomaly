@@ -20,12 +20,13 @@ from pathlib import Path
 import hydra
 import numpy as np
 import torch
-from cuvis_ai.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.channel_selector import FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
+from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
+from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.training.config import create_callbacks_from_config
@@ -40,21 +41,18 @@ FROZEN_ADACLIP_CONCRETE_BAND_INDICES: tuple[int, int, int] = (14, 59, 57)
 
 
 def _wavelengths_nm_for_band_indices(
-    splits_csv: Path,
+    universe: Path,
     indices: tuple[int, int, int],
 ) -> tuple[float, float, float]:
-    with splits_csv.open(encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+    with universe.open(encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if (r.get("path") or "").strip()]
+    if not rows:
+        raise ValueError(f"No rows with a path found in {universe}")
 
-    train_rows = [
-        r for r in rows if r.get("split") == "train" and (r.get("npz_path") or "").strip()
-    ]
-    if not train_rows:
-        train_rows = [r for r in rows if (r.get("npz_path") or "").strip()]
-    if not train_rows:
-        raise ValueError(f"No rows with npz_path found in {splits_csv}")
-
-    npz_path = Path(train_rows[0]["npz_path"])
+    # universe.csv stores `path` relative to its own dir (or absolute).
+    npz_path = Path(rows[0]["path"])
+    if not npz_path.is_absolute():
+        npz_path = universe.resolve().parent / npz_path
     if not npz_path.is_file():
         raise FileNotFoundError(f"NPZ not found: {npz_path}")
 
@@ -94,8 +92,8 @@ def main(cfg: DictConfig) -> None:
         "cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge",
     )
 
-    splits_csv = Path(cfg.data.splits_csv)
-    target_wl = _wavelengths_nm_for_band_indices(splits_csv, FROZEN_ADACLIP_CONCRETE_BAND_INDICES)
+    universe = Path(cfg.data.universe_csv)
+    target_wl = _wavelengths_nm_for_band_indices(universe, FROZEN_ADACLIP_CONCRETE_BAND_INDICES)
     logger.info(
         "Using band indices {} -> target wavelengths (R,G,B) nm = {}",
         FROZEN_ADACLIP_CONCRETE_BAND_INDICES,
@@ -106,27 +104,22 @@ def main(cfg: DictConfig) -> None:
             {
                 "band_indices_rgb_order": list(FROZEN_ADACLIP_CONCRETE_BAND_INDICES),
                 "target_wavelengths_nm_rgb_order": list(target_wl),
-                "splits_csv": str(splits_csv),
+                "universe_csv": str(universe),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
 
-    backend = "cu3s"
-    if splits_csv.is_file():
-        header = splits_csv.open(encoding="utf-8").readline()
-        if "npz_path" in header:
-            backend = "npz"
-
+    # NPZ backend: data.universe_csv + data.splits_json. CU3S backend: data.splits_csv.
     common_loader_kwargs = {
-        "splits_csv": cfg.data.splits_csv,
         "batch_size": cfg.data.batch_size,
         "num_workers": int(cfg.data.get("num_workers", 0)),
     }
-
-    if backend == "npz":
+    if cfg.data.get("universe_csv", None):
         datamodule = MultiNpzDataModule(
+            universe_csv=cfg.data.universe_csv,
+            splits=load_splits(cfg.data.splits_json),
             **common_loader_kwargs,
             pin_memory=bool(cfg.data.get("pin_memory", True)),
             persistent_workers=bool(cfg.data.get("persistent_workers", True)),
@@ -136,6 +129,7 @@ def main(cfg: DictConfig) -> None:
         )
     else:
         datamodule = MultiCu3sDataModule(
+            splits_csv=cfg.data.splits_csv,
             **common_loader_kwargs,
             processing_mode=cfg.data.processing_mode,
         )
@@ -183,20 +177,25 @@ def main(cfg: DictConfig) -> None:
         (metrics_node.metrics, tb.metrics),
     )
 
-    pipeline.visualize(
-        format="render_graphviz",
-        output_path=str(output_dir / "pipeline" / f"{pipeline.name}.png"),
-        show_execution_stage=True,
-    )
+    try:
+        pipeline.visualize(
+            format="render_graphviz",
+            output_path=str(output_dir / "pipeline" / f"{pipeline.name}.png"),
+            show_execution_stage=True,
+        )
+    except Exception as exc:  # graphviz 'dot' not installed etc. — the pipeline PNG is optional.
+        logger.warning(
+            "Skipping pipeline visualization ({}); install graphviz for the diagram.", exc
+        )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Moving pipeline to device: {}", device)
     pipeline.to(device)
 
     training_cfg = TrainingConfig.from_dict(OmegaConf.to_container(cfg.training, resolve=True))
-    if training_cfg.trainer.callbacks is None:
-        training_cfg.trainer.callbacks = CallbacksConfig()
-    training_cfg.trainer.callbacks.checkpoint = ModelCheckpointConfig(
+    if training_cfg.callbacks is None:
+        training_cfg.callbacks = CallbacksConfig()
+    training_cfg.callbacks.checkpoint = ModelCheckpointConfig(
         dirpath=str(output_dir / "checkpoints"),
         monitor="metrics_anomaly/iou",
         mode="max",
@@ -221,10 +220,9 @@ def main(cfg: DictConfig) -> None:
         datamodule=datamodule,
         loss_nodes=[loss_bridge],
         metric_nodes=[metrics_node],
-        trainer_config=training_cfg.trainer,
-        optimizer_config=training_cfg.optimizer,
+        training_config=training_cfg,
         monitors=[tb],
-        callbacks=list(create_callbacks_from_config(training_cfg.trainer.callbacks)),
+        callbacks=list(create_callbacks_from_config(training_cfg.callbacks)),
     )
     grad_trainer.fit()
 
