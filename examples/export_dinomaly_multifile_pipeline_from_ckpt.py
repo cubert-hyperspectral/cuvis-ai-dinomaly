@@ -68,12 +68,14 @@ def build_pipeline_and_datamodule(
 
     # Export runs a fresh StatisticalTrainer pass; NPZ dataset + spawn workers often
     # hit PicklingError (same as full training). Use a single-threaded loader here.
-    # NPZ backend: data.universe_csv + data.splits_json. CU3S backend: data.splits_csv.
+    # Backend from data.data_module (both read the shared universe.csv):
+    # npz_multi (default) = data.universe_csv + data.splits_json; cu3s_multi = data.universe_csv.
     common_loader_kwargs = {
         "batch_size": int(cfg.data.batch_size),
         "num_workers": 0,
     }
-    if cfg.data.get("universe_csv", None):
+    backend = str(cfg.data.get("data_module", "npz_multi"))
+    if backend == "npz_multi":
         datamodule = MultiNpzDataModule(
             universe_csv=str(cfg.data.universe_csv),
             splits=load_splits(cfg.data.splits_json),
@@ -84,12 +86,14 @@ def build_pipeline_and_datamodule(
                 cfg.data.get("worker_multiprocessing_context", "spawn")
             ),
         )
-    else:
+    elif backend == "cu3s_multi":
         datamodule = MultiCu3sDataModule(
-            splits_csv=str(cfg.data.splits_csv),
+            universe_csv=str(cfg.data.universe_csv),
             **common_loader_kwargs,
             processing_mode=str(cfg.data.processing_mode),
         )
+    else:
+        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
     datamodule.setup(stage="fit")
 
     dcfg = cfg.dinomaly

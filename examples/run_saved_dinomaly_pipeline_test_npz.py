@@ -12,7 +12,7 @@ load plugins, ``CuvisPipeline.load_pipeline(yaml, weights_path=pt, ...)``, then 
 - ``gt_mask`` — int32 category mask (same as dataloader).
 - ``rgb_image`` — CIR/RGB selector output before Dinomaly internal resize.
 - ``metric_names``, ``metric_values`` — per-batch ``AnomalyDetectionMetrics`` (TEST).
-- ``mesu_index`` — ``image_id`` from splits CSV.
+- ``mesu_index`` — ``image_id`` (the ``index`` from the universe.csv).
 - ``source_npz_path`` or ``cu3s_path`` — frame path (Unicode 0-d array), depending on backend.
 
 Writes ``manifest.jsonl`` and ``test_metrics_summary.json`` (means of node metrics across
@@ -24,7 +24,9 @@ Example::
     uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \\
         --pipeline-yaml /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models/dinomaly_multifile_cir.yaml \\
         --pipeline-pt /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models/dinomaly_multifile_cir.pt \\
-        --splits-csv /home/dev/anish/cuvis-ai-dinomaly/diagnostics/lentils_splits_npz_full.csv \\
+        --data-module npz_multi \\
+        --universe-csv /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/universe.csv \\
+        --splits-json /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/splits.json \\
         --output-dir /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/test_predictions_npz
 """
 
@@ -187,8 +189,10 @@ def main() -> None:
         help="Plugin manifest (default: examples/plugins.yaml next to this file)",
     )
     # NPZ backend: --universe-csv (universe) + --splits-json (a core DataSplitConfig).
-    # CU3S backend: --splits-csv (cu3s_multi module-owned).
-    p.add_argument("--splits-csv", type=str, default=None)
+    # Both backends read a universe.csv; --data-module selects which (npz_multi needs --splits-json).
+    p.add_argument(
+        "--data-module", type=str, default="npz_multi", choices=["npz_multi", "cu3s_multi"]
+    )
     p.add_argument("--universe-csv", type=str, default=None)
     p.add_argument("--splits-json", type=str, default=None)
     p.add_argument("--output-dir", type=Path, required=True)
@@ -214,17 +218,13 @@ def main() -> None:
     if not plugins_path.is_file():
         raise FileNotFoundError(plugins_path)
 
-    backend = "npz" if args.universe_csv else "cu3s"
-    if backend == "npz":
-        if not args.splits_json:
-            raise ValueError("--universe-csv (npz backend) also requires --splits-json.")
-        if not Path(args.universe_csv).is_file():
-            raise FileNotFoundError(args.universe_csv)
-    else:
-        if not args.splits_csv:
-            raise ValueError("provide --universe-csv + --splits-json (npz) or --splits-csv (cu3s).")
-        if not Path(args.splits_csv).is_file():
-            raise FileNotFoundError(args.splits_csv)
+    backend = "npz" if args.data_module == "npz_multi" else "cu3s"
+    if not args.universe_csv:
+        raise ValueError("--universe-csv is required for both backends.")
+    if not Path(args.universe_csv).is_file():
+        raise FileNotFoundError(args.universe_csv)
+    if backend == "npz" and not args.splits_json:
+        raise ValueError("--data-module npz_multi also requires --splits-json.")
 
     out_dir = args.output_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -259,7 +259,7 @@ def main() -> None:
         )
     else:
         datamodule = MultiCu3sDataModule(
-            splits_csv=str(args.splits_csv),
+            universe_csv=str(args.universe_csv),
             **common,
             processing_mode=args.processing_mode,
         )
@@ -392,7 +392,7 @@ def main() -> None:
     summary: dict[str, object] = {
         "n_frames": int(global_offset),
         "backend": backend,
-        "splits": str(args.universe_csv or args.splits_csv),
+        "splits": str(args.universe_csv),
         "pipeline_yaml": str(yaml_path),
         "pipeline_pt": str(pt_path),
         "node_metrics_mean_over_frames": {

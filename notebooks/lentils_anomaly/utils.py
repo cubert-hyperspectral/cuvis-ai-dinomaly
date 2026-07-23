@@ -115,18 +115,18 @@ def resolve_adaclip_wavelengths(
 ) -> tuple[float, float, float]:
     """Map AdaCLIP's frozen band ``indices`` to wavelengths (nm) using the first universe NPZ.
 
-    Reads the ``path`` of the first row in the ``universe.csv`` (``source, index, path``; the path
-    is relative to the CSV), loads its ``wavelengths`` array, and returns
-    ``(w[i0], w[i1], w[i2])`` in R,G,B order.
+    Reads the ``materialized_path`` of the first row in the ``universe.csv`` (``source, index,
+    materialized_path``; the path is relative to the CSV), loads its ``wavelengths`` array, and
+    returns ``(w[i0], w[i1], w[i2])`` in R,G,B order.
     """
     import csv as _csv
 
     universe_csv = Path(universe_csv)
     with open(universe_csv, newline="") as f:
-        rows = [r for r in _csv.DictReader(f) if (r.get("path") or "").strip()]
+        rows = [r for r in _csv.DictReader(f) if (r.get("materialized_path") or "").strip()]
     if not rows:
-        raise ValueError(f"No rows with a path in {universe_csv}")
-    npz_path = Path(rows[0]["path"])
+        raise ValueError(f"No rows with a materialized_path in {universe_csv}")
+    npz_path = Path(rows[0]["materialized_path"])
     if not npz_path.is_absolute():
         npz_path = (universe_csv.parent / npz_path).resolve()
     with np.load(npz_path) as z:

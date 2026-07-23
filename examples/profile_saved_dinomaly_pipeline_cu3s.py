@@ -10,7 +10,7 @@ Example:
     uv run python examples/profile_saved_dinomaly_pipeline_cu3s.py \
       --pipeline-yaml /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models_best/dinomaly_multifile_cir.yaml \
       --pipeline-pt /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models_best/dinomaly_multifile_cir.pt \
-      --splits-csv /home/dev/anish/cuvis-ai/lentils_splits.csv \
+      --universe-csv lentils_universe.csv \
       --num-images 10
 """
 
@@ -56,9 +56,7 @@ def main() -> None:
         default=None,
         help="Plugin manifest (default: examples/plugins.yaml)",
     )
-    ap.add_argument(
-        "--splits-csv", type=Path, default=Path("/home/dev/anish/cuvis-ai/lentils_splits.csv")
-    )
+    ap.add_argument("--universe-csv", type=Path, default=Path("lentils_universe.csv"))
     ap.add_argument("--num-images", type=int, default=10)
     ap.add_argument("--warmup-images", type=int, default=2)
     ap.add_argument("--batch-size", type=int, default=1)
@@ -79,8 +77,8 @@ def main() -> None:
     if not plugins_path.is_file():
         raise FileNotFoundError(plugins_path)
 
-    if not args.splits_csv.is_file():
-        raise FileNotFoundError(args.splits_csv)
+    if not args.universe_csv.is_file():
+        raise FileNotFoundError(args.universe_csv)
 
     total_needed = args.warmup_images + args.num_images
     if total_needed <= 0:
@@ -104,14 +102,14 @@ def main() -> None:
     pipeline.torch_layers.eval()
 
     datamodule = MultiCu3sDataModule(
-        splits_csv=str(args.splits_csv),
+        universe_csv=str(args.universe_csv),
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         processing_mode=args.processing_mode,
     )
     datamodule.setup(stage="test")
     if datamodule.test_ds is None or len(datamodule.test_ds) == 0:
-        raise RuntimeError("No test split found in splits CSV.")
+        raise RuntimeError("No test split found in the universe CSV.")
     if len(datamodule.test_ds) < total_needed:
         raise RuntimeError(
             f"Not enough test frames: need {total_needed}, have {len(datamodule.test_ds)}."

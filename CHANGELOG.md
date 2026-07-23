@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- **Adopted the dataloader's unified `universe.csv` vocabulary.** The npz universe input's `path` column is renamed `materialized_path`, and the cu3s backend now takes `universe_csv` (was `splits_csv`), matching the dataloader change that gives `cu3s_multi` and `npz_multi` one shared column set. `notebooks/lentils_anomaly/utils.py` reads `materialized_path`, and REPRODUCTION.md / LENTILS_TRAINING.md document the shared vocabulary. Needs the cuvis-ai-dataloader carrying the rename (dataloader >=0.5.0).
+- **Select the backend with `data.data_module` (`npz_multi` default, or `cu3s_multi`).** Both backends now read `universe_csv`, so the old "npz if `universe_csv` is set, else cu3s via `splits_csv`" discriminator no longer works. The multifile example scripts and `run_saved_dinomaly_pipeline_test_npz.py` (`--data-module`) branch on it; the 6 `configs/trainrun/*.yaml` set `data_module: npz_multi` and document the cu3s alternative. `profile_saved_dinomaly_pipeline_cu3s.py` takes `--universe-csv` (was `--splits-csv`).
+- The `lentils_adaclip_bands` tutorial notebook still reads the universe `path` column inline; that cell moves to `materialized_path` together with the HF Lentils universe.csv re-publish, when the notebooks are re-executed against the new data.
+
 ## 0.5.0 - 2026-07-22
 
 - **Added `PerClassAnomalyAUROC`, a streaming one-vs-background per-class pixel AUROC node.** For each non-background class it accumulates a torchmetrics `BinaryAUROC` (histogram thresholds) over that class's pixels versus background, reusing the same binned primitive as `AnomalyAUROCMetrics` through a shared `_StreamingBinnedAUROC` base rather than reimplementing AUROC, and exposes the whole-run values via `.compute()` (read off the node like the pixel/image AUROC). Registered in `examples/plugins.yaml`. It consumes a `class_mask` port (the multi-class ground truth, new in `cuvis-ai` `AnomalyDataNode`), so a pipeline can compute per-class AUROC as a node instead of a notebook-side loop. The lentils inference tutorial now attaches it to the loaded pipeline and reads its §4 per-class AUROC off the node via `.compute()` (like the overall metrics), dropping the per-frame flatten loop; §2 keeps only a slim `utils.panel_frames` extraction for the qualitative panels.

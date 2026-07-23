@@ -19,10 +19,11 @@ minmax_init_frames: 20
 
 data:
   # NPZ backend (default): a convert_split_manifest output pair.
+  data_module: npz_multi
   universe_csv: /path/to/your/universe.csv
   splits_json: /path/to/your/splits.json
-  # CU3S backend: comment the two lines above and set splits_csv instead.
-  # splits_csv: /path/to/your/splits.csv
+  # CU3S backend: set data_module: cu3s_multi and point universe_csv at a cu3s universe.csv
+  # (module-owned `split` column, or add a splits_json). universe_csv is shared by both backends.
   batch_size: 1
   processing_mode: Reflectance
   num_workers: 6

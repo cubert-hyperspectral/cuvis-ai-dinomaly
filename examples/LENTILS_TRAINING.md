@@ -77,14 +77,15 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 
 ### 4a. Split artifacts (what you pass in `data`)
 
-The backend is chosen by which config keys you set:
+The backend is chosen by `data.data_module` (both read the shared `universe.csv`):
 
-- **NPZ backend** (`MultiNpzDataModule`) — set `data.universe_csv` (the universe lookup
-  `source, index, path`) **and** `data.splits_json` (a core `DataSplitConfig` whose
-  `file_indices` selectors assign train/val/test). Both are produced by
+- **NPZ backend** (`data_module: npz_multi`, the default) — set `data.universe_csv` (the universe
+  lookup `source, index, materialized_path`) **and** `data.splits_json` (a core `DataSplitConfig`
+  whose `file_indices` selectors assign train/val/test). Both are produced by
   `convert_split_manifest`. This is the fast path and what we used.
-- **cu3s backend** (`MultiCu3sDataModule`) — set `data.splits_csv` (the cu3s_multi
-  module-owned split CSV); reads cu3s directly (`processing_mode: Reflectance`).
+- **cu3s backend** (`data_module: cu3s_multi`) — set `data.universe_csv` at a cu3s universe.csv
+  (a module-owned `split` column, or add a `splits_json`); reads cu3s directly
+  (`processing_mode: Reflectance`).
 
 `split ∈ {train, val, test}` are consumed; any other value (e.g. `adaclip_train`) is ignored.
 

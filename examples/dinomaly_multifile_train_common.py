@@ -103,14 +103,16 @@ def run_dinomaly_multifile_training(
     output_dir = Path(cfg.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pick the datalake backend from the config keys present:
-    # - NPZ:  `data.universe_csv` (universe) + `data.splits_json` (a core DataSplitConfig).
-    # - CU3S: `data.splits_csv` (the cu3s_multi module-owned split CSV).
+    # Pick the datalake backend from `data.data_module` (both read the shared universe.csv):
+    # - npz_multi (default): `data.universe_csv` + `data.splits_json` (a core DataSplitConfig).
+    # - cu3s_multi: `data.universe_csv` (cu3s recordings; a module-owned `split` column, or pair
+    #   it with a `splits_json`). `universe_csv` is the one input key across both backends now.
     common_loader_kwargs = {
         "batch_size": cfg.data.batch_size,
         "num_workers": int(cfg.data.get("num_workers", 0)),
     }
-    if cfg.data.get("universe_csv", None):
+    backend = str(cfg.data.get("data_module", "npz_multi"))
+    if backend == "npz_multi":
         datamodule = MultiNpzDataModule(
             universe_csv=cfg.data.universe_csv,
             splits=load_splits(cfg.data.splits_json),
@@ -121,12 +123,14 @@ def run_dinomaly_multifile_training(
                 cfg.data.get("worker_multiprocessing_context", "spawn")
             ),
         )
-    else:
+    elif backend == "cu3s_multi":
         datamodule = MultiCu3sDataModule(
-            splits_csv=cfg.data.splits_csv,
+            universe_csv=cfg.data.universe_csv,
             **common_loader_kwargs,
             processing_mode=cfg.data.processing_mode,
         )
+    else:
+        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
     datamodule.setup(stage="fit")
 
     dcfg = cfg.dinomaly

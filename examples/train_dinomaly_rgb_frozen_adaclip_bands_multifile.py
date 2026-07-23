@@ -45,12 +45,12 @@ def _wavelengths_nm_for_band_indices(
     indices: tuple[int, int, int],
 ) -> tuple[float, float, float]:
     with universe.open(encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if (r.get("path") or "").strip()]
+        rows = [r for r in csv.DictReader(f) if (r.get("materialized_path") or "").strip()]
     if not rows:
-        raise ValueError(f"No rows with a path found in {universe}")
+        raise ValueError(f"No rows with a materialized_path found in {universe}")
 
-    # universe.csv stores `path` relative to its own dir (or absolute).
-    npz_path = Path(rows[0]["path"])
+    # universe.csv stores `materialized_path` relative to its own dir (or absolute).
+    npz_path = Path(rows[0]["materialized_path"])
     if not npz_path.is_absolute():
         npz_path = universe.resolve().parent / npz_path
     if not npz_path.is_file():
@@ -111,12 +111,14 @@ def main(cfg: DictConfig) -> None:
         encoding="utf-8",
     )
 
-    # NPZ backend: data.universe_csv + data.splits_json. CU3S backend: data.splits_csv.
+    # Backend from data.data_module (both read the shared universe.csv):
+    # npz_multi (default) = data.universe_csv + data.splits_json; cu3s_multi = data.universe_csv.
     common_loader_kwargs = {
         "batch_size": cfg.data.batch_size,
         "num_workers": int(cfg.data.get("num_workers", 0)),
     }
-    if cfg.data.get("universe_csv", None):
+    backend = str(cfg.data.get("data_module", "npz_multi"))
+    if backend == "npz_multi":
         datamodule = MultiNpzDataModule(
             universe_csv=cfg.data.universe_csv,
             splits=load_splits(cfg.data.splits_json),
@@ -127,12 +129,14 @@ def main(cfg: DictConfig) -> None:
                 cfg.data.get("worker_multiprocessing_context", "spawn")
             ),
         )
-    else:
+    elif backend == "cu3s_multi":
         datamodule = MultiCu3sDataModule(
-            splits_csv=cfg.data.splits_csv,
+            universe_csv=cfg.data.universe_csv,
             **common_loader_kwargs,
             processing_mode=cfg.data.processing_mode,
         )
+    else:
+        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
     datamodule.setup(stage="fit")
 
     dcfg = cfg.dinomaly

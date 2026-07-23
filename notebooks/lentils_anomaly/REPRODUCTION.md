@@ -172,7 +172,7 @@ notebook at it via its `PIPELINE_DIR` variable.
 The Hydra scripts in `examples/` are the canonical path for the definitive 50-epoch numbers
 (they add the LR scheduler + all knobs the notebooks omit for clarity). The NPZ backend takes a
 `data.universe_csv` + `data.splits_json` pair (a `convert_split_manifest` output); the cu3s backend
-takes `data.splits_csv` instead.
+takes `data.universe_csv` with `data_module: cu3s_multi` instead.
 
 ```bash
 # RGB (fixed wavelengths). <UNIVERSE>/<SPLITS_JSON> = a convert_split_manifest pair; <OUT> = output dir.
