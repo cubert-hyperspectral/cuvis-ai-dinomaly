@@ -82,7 +82,7 @@ The backend is chosen by `data.data_module` (both read the shared `universe.csv`
 - **NPZ backend** (`data_module: npz_multi`, the default) — set `data.universe_csv` (the universe
   lookup `source, index, materialized_path`) **and** `data.splits_json` (a core `DataSplitConfig`
   whose `file_indices` selectors assign train/val/test). Both are produced by
-  `convert_split_manifest`. This is the fast path and what we used.
+  `convert_universe`. This is the fast path and what we used.
 - **cu3s backend** (`data_module: cu3s_multi`) — set `data.universe_csv` at a cu3s universe.csv
   (a module-owned `split` column, or add a `splits_json`); reads cu3s directly
   (`processing_mode: Reflectance`).
@@ -107,7 +107,7 @@ so each read frame is labelled by the correct COCO image (see the converter's do
 
 ### 4c. The Dinomaly split (train-on-normals)
 
-Published as `splits_dinomaly.csv` on the HF dataset
+Published as `splits/dinomaly.json` (a selector over the shipped `universe.csv`) on the HF dataset
 `cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils`:
 
 | split | frames | anomalous | role |

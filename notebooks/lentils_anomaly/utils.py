@@ -15,22 +15,23 @@ Lentils dataset
 61-channel VNIR (430-910 nm), foreign-object anomaly detection. Published on HuggingFace at
 ``cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils`` (merged cu3s sessions per day +
 per-day global COCO). The Dinomaly split (train-on-normals) is the dataset's
-``splits_dinomaly.csv``: train 308 (normal) / val 148 / test 180 / adaclip_train 500 (held out).
+``splits/dinomaly.json`` (a selector over the shipped ``universe.csv``): train 308 (normal) /
+val 148 / test 180 (adaclip_train 500 held out in ``splits/adaclip.json``).
 
 Data workflow (the selector split model)
 ----------------------------------------
 1. Download the cu3s dataset from HF via
    :class:`cuvis_ai_core.data.public_datasets.PublicDatasets`.
-2. Convert each ``splits_dinomaly.csv`` frame to per-frame NPZ (baked ``mask`` + ``class_mask``)
-   with cuvis-ai-dataloader's ``convert_split_manifest``, emitting two artifacts: a
-   **universe.csv** (``source, index, path``: the sample universe, one row per frame) and a baked
-   **splits.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors). The generated
-   splits.json is identical to the dataset's shipped ``splits/dinomaly.json``.
+2. Convert the frames ``splits/dinomaly.json`` selects to per-frame NPZ (baked ``mask`` +
+   ``class_mask``) with cuvis-ai-dataloader's ``convert_universe``, emitting two artifacts: a
+   **universe.csv** (``source, index, materialized_path``: the sample universe, one row per frame)
+   and a baked **splits.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors). The
+   generated splits.json is identical to the dataset's shipped ``splits/dinomaly.json``.
 3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``), given the splits.json
    (``DataSplitConfig(splits_path=...)``) resolved over the ``universe_csv``.
 
 The notebooks run steps 1-2 directly with ``PublicDatasets.download_dataset`` +
-``convert_split_manifest``.
+``convert_universe``.
 """
 
 from __future__ import annotations

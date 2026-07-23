@@ -15,7 +15,7 @@ eval_mode: best
 minmax_init_frames: 20
 
 data:
-  # NPZ backend (default): a convert_split_manifest output pair.
+  # NPZ backend (default): a convert_universe output pair.
   data_module: npz_multi
   universe_csv: /path/to/your/universe.csv
   splits_json: /path/to/your/splits.json
