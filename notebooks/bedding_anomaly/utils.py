@@ -396,7 +396,7 @@ def prepare_bedding_data(
     match the pretrained pipeline), pairs it with its GT mask (rasterized into a binary ``mask`` and
     a multi-class ``class_mask``; zeros for a normal frame), and writes one compressed ``.npz``. It
     then emits the two artifacts the data module consumes: a ``universe.csv`` (``source, index,
-    path``; one measurement per file, so ``index`` is always 0) and a baked ``splits.json`` (core
+    materialized_path``; one measurement per file, so ``index`` is always 0) and a baked ``splits.json`` (core
     ``DataSplitConfig`` of ``file_indices`` selectors, ``predict`` mapped to ``val``). Reruns reuse
     the artifacts when both already exist under ``npz_dir``. Returns ``(splits_json, universe_csv)``,
     ready for ``MultiNpzDataModule(splits=DataSplitConfig(splits_path=splits_json),

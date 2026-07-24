@@ -104,14 +104,14 @@ Training scripts are in [`examples/`](examples/). Each pairs with a matching Hyd
 |--------|-------------|
 | `train_dinomaly_rgb_multifile.py` | Train on false-RGB from NPZ files |
 | `train_dinomaly_cir_multifile.py` | Train on CIR (NIR/Red/Green) band mapping |
-| `train_dinomaly_concrete_multifile.py` | Train with a fixed concrete band selector |
-| `train_dinomaly_concrete_selector_multifile.py` | Train with learnable band selector |
+| `train_dinomaly_concrete_multifile.py` | Fixed concrete band selector (routes through the shared trainer — now fails fast; use the joint script) |
+| `train_dinomaly_concrete_selector_multifile.py` | Learnable band selector (routes through the shared trainer — now fails fast; use the joint script) |
 | `train_dinomaly_concrete_joint_multifile.py` | Joint training of selector + detector |
 | `train_dinomaly_rgb_frozen_adaclip_bands_multifile.py` | Fixed bands from a frozen AdaCLIP selector |
 | `run_saved_dinomaly_pipeline_test_npz.py` | Run inference on saved pipeline |
 | `export_dinomaly_multifile_pipeline_from_ckpt.py` | Export pipeline from checkpoint |
 
-Quick start (edit `universe` + `splits_json` in the config first):
+Quick start (edit `universe_csv` + `splits_json` in the config first):
 
 ```bash
 uv run python examples/train_dinomaly_rgb_multifile.py
