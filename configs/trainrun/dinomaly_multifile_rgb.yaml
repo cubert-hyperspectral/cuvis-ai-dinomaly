@@ -1,6 +1,6 @@
 # @package _global_
 #
-# Dinomaly + MultiFileCu3sDataModule (RGB false-color). Run from cuvis-ai-dinomaly repo:
+# Dinomaly + multi-file data (RGB false-color). Run from cuvis-ai-dinomaly repo:
 #   uv run python examples/train_dinomaly_rgb_multifile.py
 #   uv run python examples/train_dinomaly_rgb_multifile.py data.universe_csv=/path/to/universe.csv data.splits_json=/path/to/splits.json
 #
@@ -19,11 +19,12 @@ eval_mode: best
 minmax_init_frames: 20
 
 data:
-  # NPZ backend (default): a convert_split_manifest output pair.
+  # NPZ backend (default): a convert_universe output pair.
+  data_module: npz_multi
   universe_csv: /path/to/your/universe.csv
   splits_json: /path/to/your/splits.json
-  # CU3S backend: comment the two lines above and set splits_csv instead.
-  # splits_csv: /path/to/your/splits.csv
+  # CU3S backend: set data_module: cu3s_multi and point universe_csv at a cu3s universe.csv
+  # (module-owned `split` column, or add a splits_json). universe_csv is shared by both backends.
   batch_size: 1
   processing_mode: Reflectance
   num_workers: 6

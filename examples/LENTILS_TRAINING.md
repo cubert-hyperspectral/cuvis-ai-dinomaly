@@ -64,7 +64,7 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 | cuvis-ai | ≥ 0.10 |
 | cuvis-ai-core | ≥ 0.10 |
 | cuvis-ai-schemas | ≥ 0.7 |
-| cuvis-ai-dataloader | ≥ 0.3 (provides `MultiNpzDataModule` / `MultiCu3sDataModule`) |
+| cuvis-ai-dataloader | ≥ 0.5 (provides `MultiNpzDataModule` / `MultiCu3sDataModule` / `convert_universe`) |
 | anomalib | 2.1 |
 
 - A **CUDA GPU** is required (~148 M params, ~592 MB saved pipeline).
@@ -77,14 +77,15 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 
 ### 4a. Split artifacts (what you pass in `data`)
 
-The backend is chosen by which config keys you set:
+The backend is chosen by `data.data_module` (both read the shared `universe.csv`):
 
-- **NPZ backend** (`MultiNpzDataModule`) — set `data.universe_csv` (the universe lookup
-  `source, index, path`) **and** `data.splits_json` (a core `DataSplitConfig` whose
-  `file_indices` selectors assign train/val/test). Both are produced by
-  `convert_split_manifest`. This is the fast path and what we used.
-- **cu3s backend** (`MultiCu3sDataModule`) — set `data.splits_csv` (the cu3s_multi
-  module-owned split CSV); reads cu3s directly (`processing_mode: Reflectance`).
+- **NPZ backend** (`data_module: npz_multi`, the default) — set `data.universe_csv` (the universe
+  lookup `source, index, materialized_path`) **and** `data.splits_json` (a core `DataSplitConfig`
+  whose `file_indices` selectors assign train/val/test). Both are produced by
+  `convert_universe`. This is the fast path and what we used.
+- **cu3s backend** (`data_module: cu3s_multi`) — set `data.universe_csv` at a cu3s universe.csv
+  (a module-owned `split` column, or add a `splits_json`); reads cu3s directly
+  (`processing_mode: Reflectance`).
 
 `split ∈ {train, val, test}` are consumed; any other value (e.g. `adaclip_train`) is ignored.
 
@@ -99,14 +100,16 @@ Each `.npz` holds:
 | `mask` | `[H, W]` int32 | binary GT (foreign object = 1); **absent on normal frames** → loader emits zeros |
 | `class_mask` | `[H, W]` uint8 | per-pixel COCO category id (0 = background); enables per-class AUROC |
 
-Produce NPZ from cu3s + COCO with **cuvis-ai-dataloader**'s converter
-(`cu3s-to-npz` / `convert_cu3s_file`). For **merged** cu3s whose annotated frames are sparse
-(cu3s frame index ≠ COCO image id — as in lentils), pass `image_ids` parallel to `frame_indices`
-so each read frame is labelled by the correct COCO image (see the converter's docstring).
+Produce NPZ from a shipped `universe.csv` + `splits.json` with **cuvis-ai-dataloader**'s
+`convert_universe(universe.csv, dataset_root, NPZ_DIR, splits_json=splits/dinomaly.json)`: it
+materializes exactly the frames the `splits.json` selects and emits an npz `universe.csv`
+(`source, index, materialized_path`). A frame's COCO `image_id` is its read `index` (they are the
+same — the old separate-id decoupling is gone). The lower-level `cu3s-to-npz` / `convert_cu3s_file`
+remain available for ad-hoc conversion.
 
 ### 4c. The Dinomaly split (train-on-normals)
 
-Published as `splits_dinomaly.csv` on the HF dataset
+Published as `splits/dinomaly.json` (a selector over the shipped `universe.csv`) on the HF dataset
 `cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils`:
 
 | split | frames | anomalous | role |
@@ -123,7 +126,8 @@ models are directly comparable.
 
 ## 5. How to run
 
-From the repo root. `<SPLITS>` = your split CSV (NPZ backend recommended), `<OUT>` = output dir.
+From the repo root. `<INDEX>` = the `universe.csv`, `<SPLITS_JSON>` = the `splits.json` (a
+`convert_universe` output pair), `<OUT>` = output dir.
 
 ```bash
 # RGB (fixed 650/550/450)
@@ -191,7 +195,7 @@ uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
 
 For a **per-class pixel AUROC** breakdown (uses the baked `class_mask`), use the
 `notebooks/lentils_anomaly/lentils_inference_tutorial.ipynb` notebook (set
-`LENTILS_PIPELINE_DIR=<OUT>/trained_models`).
+`PIPELINE_DIR=<OUT>/trained_models`).
 
 ---
 

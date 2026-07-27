@@ -15,22 +15,23 @@ Lentils dataset
 61-channel VNIR (430-910 nm), foreign-object anomaly detection. Published on HuggingFace at
 ``cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils`` (merged cu3s sessions per day +
 per-day global COCO). The Dinomaly split (train-on-normals) is the dataset's
-``splits_dinomaly.csv``: train 308 (normal) / val 148 / test 180 / adaclip_train 500 (held out).
+``splits/dinomaly.json`` (a selector over the shipped ``universe.csv``): train 308 (normal) /
+val 148 / test 180 (adaclip_train 500 held out in ``splits/adaclip.json``).
 
 Data workflow (the selector split model)
 ----------------------------------------
 1. Download the cu3s dataset from HF via
    :class:`cuvis_ai_core.data.public_datasets.PublicDatasets`.
-2. Convert each ``splits_dinomaly.csv`` frame to per-frame NPZ (baked ``mask`` + ``class_mask``)
-   with cuvis-ai-dataloader's ``convert_split_manifest``, emitting two artifacts: a
-   **universe.csv** (``source, index, path``: the sample universe, one row per frame) and a baked
-   **splits.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors). The generated
-   splits.json is identical to the dataset's shipped ``splits/dinomaly.json``.
+2. Convert the frames ``splits/dinomaly.json`` selects to per-frame NPZ (baked ``mask`` +
+   ``class_mask``) with cuvis-ai-dataloader's ``convert_universe``, emitting two artifacts: a
+   **universe.csv** (``source, index, materialized_path``: the sample universe, one row per frame)
+   and a baked **splits.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors). The
+   generated splits.json is identical to the dataset's shipped ``splits/dinomaly.json``.
 3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``), given the splits.json
    (``DataSplitConfig(splits_path=...)``) resolved over the ``universe_csv``.
 
 The notebooks run steps 1-2 directly with ``PublicDatasets.download_dataset`` +
-``convert_split_manifest``.
+``convert_universe``.
 """
 
 from __future__ import annotations
@@ -115,18 +116,18 @@ def resolve_adaclip_wavelengths(
 ) -> tuple[float, float, float]:
     """Map AdaCLIP's frozen band ``indices`` to wavelengths (nm) using the first universe NPZ.
 
-    Reads the ``path`` of the first row in the ``universe.csv`` (``source, index, path``; the path
-    is relative to the CSV), loads its ``wavelengths`` array, and returns
-    ``(w[i0], w[i1], w[i2])`` in R,G,B order.
+    Reads the ``materialized_path`` of the first row in the ``universe.csv`` (``source, index,
+    materialized_path``; the path is relative to the CSV), loads its ``wavelengths`` array, and
+    returns ``(w[i0], w[i1], w[i2])`` in R,G,B order.
     """
     import csv as _csv
 
     universe_csv = Path(universe_csv)
     with open(universe_csv, newline="") as f:
-        rows = [r for r in _csv.DictReader(f) if (r.get("path") or "").strip()]
+        rows = [r for r in _csv.DictReader(f) if (r.get("materialized_path") or "").strip()]
     if not rows:
-        raise ValueError(f"No rows with a path in {universe_csv}")
-    npz_path = Path(rows[0]["path"])
+        raise ValueError(f"No rows with a materialized_path in {universe_csv}")
+    npz_path = Path(rows[0]["materialized_path"])
     if not npz_path.is_absolute():
         npz_path = (universe_csv.parent / npz_path).resolve()
     with np.load(npz_path) as z:

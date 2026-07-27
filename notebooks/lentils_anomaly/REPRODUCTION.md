@@ -46,24 +46,26 @@ for `uv pip install 'cuvis-ai-dataloader[cu3s,coco]>=<version>'` and drop the lo
 
 **2. Download + convert from HF → per-frame NPZ**
 
-The train-on-normals split is `splits_dinomaly.csv` on the HF dataset. Its train/val/test frames
-(636) convert to per-frame NPZ (grouped by cu3s; each session downloaded once). Simplest driver:
+The train-on-normals split is `splits/dinomaly.json` (a selector over the shipped `universe.csv`)
+on the HF dataset. Its train/val/test frames (636) convert to per-frame NPZ (grouped by cu3s; each
+session downloaded once). Simplest driver:
 
 ```python
 from cuvis_ai_core.data.public_datasets import PublicDatasets
-from cuvis_ai_dataloader.data.npz_converter import convert_split_manifest
+from cuvis_ai_dataloader.data.npz_converter import convert_universe
 
 data_dir = "<data_dir>"  # raw cu3s land here
 raw = f"{data_dir}/XMR_Industrial_Foreign_Object_Detection_Lentils"
 PublicDatasets.download_dataset("industrial_fod_lentils", download_path=data_dir, force=False)
-result = convert_split_manifest(
-    f"{raw}/splits_dinomaly.csv", raw, "<npz_out_dir>",
-    universe_csv="<npz_out_dir>/universe.csv", splits_json="<npz_out_dir>/splits.json",
+result = convert_universe(
+    f"{raw}/universe.csv", raw, "<npz_out_dir>",
+    splits_json=f"{raw}/splits/dinomaly.json",
+    out_universe_csv="<npz_out_dir>/universe.csv", out_splits_json="<npz_out_dir>/splits.json",
 )
 splits_json, universe_csv = result.splits_json, result.universe_csv
 ```
 
-`convert_split_manifest` writes a **`universe.csv`** (`source, index, path`) + a baked
+`convert_universe` writes a **`universe.csv`** (`source, index, materialized_path`) + a baked
 **`splits.json`** (see *Data model* below), reused on rerun. Tip: convert one session per
 subprocess — the cuvis SDK aborts the *process* on session teardown *after* the files are written,
 so per-session isolation keeps a long convert resumable + lossless.
@@ -116,7 +118,7 @@ A CUDA GPU is required (DINOv2 reg ViT-B/14 encoder, ~148 M params, ~592 MB pipe
 anomalies. Published: `cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils`.
 
 Dinomaly is unsupervised and reconstruction-based, so it **trains on normal frames only**. The
-train-on-normals split (`splits_dinomaly.csv` on HF):
+train-on-normals split (`splits/dinomaly.json` on HF):
 
 | split | frames | anomalous | role |
 |---|---|---|---|
@@ -131,12 +133,12 @@ two models stay directly comparable.
 ## Data model: `universe.csv` + `splits.json` (the selector split model)
 
 The provisioning downloads the cu3s dataset from HuggingFace (via `PublicDatasets`), converts the
-`splits_dinomaly.csv` frames to per-frame NPZ with cuvis-ai-dataloader's `convert_split_manifest`,
+frames `splits/dinomaly.json` selects to per-frame NPZ with cuvis-ai-dataloader's `convert_universe`,
 and yields `(splits_json, universe_csv)`:
 
-- **`universe.csv`** (`source, index, path`) is the sample universe: one row per frame, `source` the
-  posix cu3s path, `index` the measurement index (`local_image_id`, also the COCO `image_id`), `path`
-  the per-frame `.npz` relative to the CSV. Each NPZ carries `cube [H,W,61]`, `wavelengths [61]`, and
+- **`universe.csv`** (`source, index, materialized_path`) is the sample universe: one row per frame,
+  `source` the posix cu3s path, `index` the measurement index (`local_image_id`, also the COCO
+  `image_id`), `materialized_path` the per-frame `.npz` relative to the CSV. Each NPZ carries `cube [H,W,61]`, `wavelengths [61]`, and
   — for annotated frames — a baked binary `mask [H,W]` + category `class_mask [H,W]` (normal frames
   have no mask key; the loader emits zeros).
 - **`splits.json`** is the baked assignment: a core `DataSplitConfig` of `file_indices` selectors
@@ -171,11 +173,11 @@ notebook at it via its `PIPELINE_DIR` variable.
 
 The Hydra scripts in `examples/` are the canonical path for the definitive 50-epoch numbers
 (they add the LR scheduler + all knobs the notebooks omit for clarity). The NPZ backend takes a
-`data.universe_csv` + `data.splits_json` pair (a `convert_split_manifest` output); the cu3s backend
-takes `data.splits_csv` instead.
+`data.universe_csv` + `data.splits_json` pair (a `convert_universe` output); the cu3s backend
+takes `data.universe_csv` with `data_module: cu3s_multi` instead.
 
 ```bash
-# RGB (fixed wavelengths). <UNIVERSE>/<SPLITS_JSON> = a convert_split_manifest pair; <OUT> = output dir.
+# RGB (fixed wavelengths). <UNIVERSE>/<SPLITS_JSON> = a convert_universe pair; <OUT> = output dir.
 uv run python examples/train_dinomaly_rgb_multifile.py \
   output_dir=<OUT>/dinomaly_rgb_50ep \
   training.max_epochs=50 \
