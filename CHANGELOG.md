@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.6.0 - 2026-08-20
+
 - Adopted the dataloader's unified `universe.csv` vocabulary: the npz universe input's `path` column is renamed `materialized_path`, and the cu3s backend takes `universe_csv` (was `splits_csv`), matching the dataloader change that gives `cu3s_multi` and `npz_multi` one shared column set. `notebooks/lentils_anomaly/utils.py` reads `materialized_path`; REPRODUCTION.md and LENTILS_TRAINING.md document the shared vocabulary.
 - Backend selection now goes through `data.data_module` (`npz_multi` default, or `cu3s_multi`): both backends read `universe_csv`, so the old discriminator (npz if `universe_csv` is set, else cu3s via `splits_csv`) no longer works. The multifile example scripts and `run_saved_dinomaly_pipeline_test_npz.py` branch on `--data-module`; the 6 `configs/trainrun/*.yaml` set `data_module: npz_multi` and document the cu3s alternative; `profile_saved_dinomaly_pipeline_cu3s.py` takes `--universe-csv` (was `--splits-csv`).
 - Repointed the four `notebooks/lentils_anomaly/` tutorials (rgb, cir, adaclip_bands, inference) to `convert_universe`: they now download the dataset and call `cuvis_ai_dataloader.data.npz_converter.convert_universe(universe.csv, splits_json=splits/dinomaly.json)` instead of `convert_split_manifest(splits_dinomaly.csv)`, because the HF dataset now ships a `universe.csv` plus `splits/*.json` selectors rather than the rich cu3s split CSV. The `lentils_adaclip_bands` cell deriving the AdaCLIP wavelengths reads `materialized_path`; REPRODUCTION.md, LENTILS_TRAINING.md, and `utils.py` describe the `convert_universe` flow.
