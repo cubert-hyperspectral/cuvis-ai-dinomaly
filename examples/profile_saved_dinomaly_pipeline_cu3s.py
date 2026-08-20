@@ -54,7 +54,7 @@ def main() -> None:
         "--plugins",
         type=Path,
         default=None,
-        help="Plugin manifest (default: examples/plugins.yaml)",
+        help="Plugin manifest (default: configs/plugins/dinomaly.yaml)",
     )
     ap.add_argument("--universe-csv", type=Path, default=Path("lentils_universe.csv"))
     ap.add_argument("--num-images", type=int, default=10)
@@ -73,7 +73,11 @@ def main() -> None:
     if not pt_path.is_file():
         raise FileNotFoundError(pt_path)
 
-    plugins_path = args.plugins.resolve() if args.plugins else (_EXAMPLES / "plugins.yaml")
+    plugins_path = (
+        args.plugins.resolve()
+        if args.plugins
+        else (_EXAMPLES.parent / "configs" / "plugins" / "dinomaly.yaml")
+    )
     if not plugins_path.is_file():
         raise FileNotFoundError(plugins_path)
 

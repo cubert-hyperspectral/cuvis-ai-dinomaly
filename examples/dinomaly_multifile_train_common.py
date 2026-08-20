@@ -91,7 +91,7 @@ def run_dinomaly_multifile_training(
     """
     logger.info(run_title)
 
-    plugins_manifest = Path(__file__).resolve().parent / "plugins.yaml"
+    plugins_manifest = Path(__file__).resolve().parents[1] / "configs" / "plugins" / "dinomaly.yaml"
     registry = NodeRegistry()
     registry.register_plugin(str(plugins_manifest))
     DinomalyDetector = NodeRegistry.get("cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector")

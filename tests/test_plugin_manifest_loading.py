@@ -1,4 +1,4 @@
-"""Plugin-manifest loading smoke tests for local development manifests."""
+"""Plugin-manifest loading smoke tests for the local development manifest."""
 
 from __future__ import annotations
 
@@ -8,16 +8,19 @@ import pytest
 
 
 @pytest.mark.integration
-def test_examples_plugins_manifest_loads_and_registers_nodes() -> None:
-    """Ensure NodeRegistry can load the local plugin manifest and resolve classes."""
+def test_plugin_manifest_loads_and_registers_all_capabilities() -> None:
+    """Ensure NodeRegistry loads the manifest and resolves every declared capability."""
     from cuvis_ai_core.utils.node_registry import NodeRegistry
 
-    manifest = Path(__file__).resolve().parents[1] / "examples" / "plugins.yaml"
+    manifest = Path(__file__).resolve().parents[1] / "configs" / "plugins" / "dinomaly.yaml"
     registry = NodeRegistry()
     registry.register_plugin(str(manifest))
 
-    det = registry.get("DinomalyDetector")
-    bridge = registry.get("DinomalyTrainLossBridge")
-
-    assert det.__name__ == "DinomalyDetector"
-    assert bridge.__name__ == "DinomalyTrainLossBridge"
+    for class_name in (
+        "DinomalyDetector",
+        "DinomalyTrainLossBridge",
+        "AnomalyAUROCMetrics",
+        "PerClassAnomalyAUROC",
+        "ValNormalAnomalyMean",
+    ):
+        assert registry.get(class_name).__name__ == class_name

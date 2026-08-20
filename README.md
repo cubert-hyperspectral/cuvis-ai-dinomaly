@@ -80,6 +80,8 @@ capabilities:
   - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
   - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
   - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
+  - class_name: cuvis_ai_dinomaly.node.per_class_auroc.PerClassAnomalyAUROC
+  - class_name: cuvis_ai_dinomaly.node.val_anomaly_mean.ValNormalAnomalyMean
 ```
 
 **Git tag** (reproducible install from a tagged release):
@@ -87,14 +89,19 @@ capabilities:
 ```yaml
 name: dinomaly
 repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly.git"
-tag: "v0.1.4"
+tag: "v0.5.0"
 capabilities:
   - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
   - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
   - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
+  - class_name: cuvis_ai_dinomaly.node.per_class_auroc.PerClassAnomalyAUROC
+  # ValNormalAnomalyMean ships with the next tagged release; add its entry when bumping the tag.
 ```
 
-A ready-to-use local-path manifest is committed at [`examples/plugins.yaml`](examples/plugins.yaml).
+A ready-to-use local-path manifest is committed at
+[`configs/plugins/dinomaly.yaml`](configs/plugins/dinomaly.yaml), next to the provisioned
+[`configs/plugins/cuvis_ai_dataloader.yaml`](configs/plugins/cuvis_ai_dataloader.yaml), so
+`configs/plugins/` works directly as a `--plugins-dir`.
 
 ## Examples
 

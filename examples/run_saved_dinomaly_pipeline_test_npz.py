@@ -186,7 +186,7 @@ def main() -> None:
         "--plugins",
         type=Path,
         default=None,
-        help="Plugin manifest (default: examples/plugins.yaml next to this file)",
+        help="Plugin manifest (default: configs/plugins/dinomaly.yaml in this repo)",
     )
     # NPZ backend: --universe-csv (universe) + --splits-json (a core DataSplitConfig).
     # Both backends read a universe.csv; --data-module selects which (npz_multi needs --splits-json).
@@ -213,8 +213,12 @@ def main() -> None:
     if not pt_path.is_file():
         raise FileNotFoundError(pt_path)
 
-    examples_dir = Path(__file__).resolve().parent
-    plugins_path = args.plugins.resolve() if args.plugins else (examples_dir / "plugins.yaml")
+    repo_root = Path(__file__).resolve().parents[1]
+    plugins_path = (
+        args.plugins.resolve()
+        if args.plugins
+        else (repo_root / "configs" / "plugins" / "dinomaly.yaml")
+    )
     if not plugins_path.is_file():
         raise FileNotFoundError(plugins_path)
 
