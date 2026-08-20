@@ -156,7 +156,7 @@ def main() -> None:
     p.add_argument(
         "--plugins",
         type=Path,
-        default=examples_dir / "plugins.yaml",
+        default=examples_dir.parent / "configs" / "plugins" / "dinomaly.yaml",
     )
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--batch-size", type=int, default=1)

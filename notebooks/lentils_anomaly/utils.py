@@ -44,7 +44,7 @@ import numpy as np
 
 # --------------------------------------------------------------------------- config
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PLUGINS_YAML = REPO_ROOT / "examples" / "plugins.yaml"
+DEFAULT_PLUGINS_YAML = REPO_ROOT / "configs" / "plugins" / "dinomaly.yaml"
 
 LENTILS_HF_REPO_ID = "cubert-gmbh/XMR_Industrial_Foreign_Object_Detection_Lentils"
 #: PublicDatasets registry name / alias for the dataset (see cuvis-ai-core public_datasets).
@@ -69,8 +69,8 @@ LENTILS_CATEGORIES: dict[int, str] = {
 }
 
 #: The three cube-channel indices AdaCLIP's frozen concrete selector converged to on lentils.
-#: Resolved to wavelengths per-dataset by :func:`resolve_adaclip_wavelengths` (typically
-#: ~(542, 902, 886) nm on the 61-band lentils data), then fed to a FixedWavelengthSelector.
+#: The AdaCLIP-bands notebook resolves them to wavelengths from the data (typically
+#: ~(542, 902, 886) nm on the 61-band lentils data), then feeds a FixedWavelengthSelector.
 ADACLIP_BAND_INDICES: tuple[int, int, int] = (14, 59, 57)
 
 
@@ -108,36 +108,6 @@ def resolve_pipeline(pipeline_dir: str | Path = DEFAULT_PIPELINE_DIR) -> tuple[P
     if not pt_path.is_file():
         raise FileNotFoundError(f"Missing weights next to {yaml_path.name}: {pt_path}")
     return yaml_path, pt_path
-
-
-# --------------------------------------------------------------------------- selectors
-def resolve_adaclip_wavelengths(
-    universe_csv: str | Path, indices: tuple[int, int, int] = ADACLIP_BAND_INDICES
-) -> tuple[float, float, float]:
-    """Map AdaCLIP's frozen band ``indices`` to wavelengths (nm) using the first universe NPZ.
-
-    Reads the ``materialized_path`` of the first row in the ``universe.csv`` (``source, index,
-    materialized_path``; the path is relative to the CSV), loads its ``wavelengths`` array, and
-    returns ``(w[i0], w[i1], w[i2])`` in R,G,B order.
-    """
-    import csv as _csv
-
-    universe_csv = Path(universe_csv)
-    with open(universe_csv, newline="") as f:
-        rows = [r for r in _csv.DictReader(f) if (r.get("materialized_path") or "").strip()]
-    if not rows:
-        raise ValueError(f"No rows with a materialized_path in {universe_csv}")
-    npz_path = Path(rows[0]["materialized_path"])
-    if not npz_path.is_absolute():
-        npz_path = (universe_csv.parent / npz_path).resolve()
-    with np.load(npz_path) as z:
-        if "wavelengths" not in z.files:
-            raise KeyError(f"{npz_path} has no 'wavelengths'")
-        w = np.asarray(z["wavelengths"], dtype=np.float64).ravel()
-    for i in indices:
-        if not (0 <= i < len(w)):
-            raise IndexError(f"band index {i} out of range for {len(w)} bands")
-    return (float(w[indices[0]]), float(w[indices[1]]), float(w[indices[2]]))
 
 
 # --------------------------------------------------------------------------- data
@@ -250,41 +220,13 @@ def panel_frames(collected: list, datamodule: Any) -> list[dict[str, Any]]:
                     "score_map": None if score is None else score.astype(np.float32),
                     "anomaly_score": None if ascore is None else float(ascore[i].item()),
                     "mask": None if m is None else m.astype(np.int32),
-                    "path": rec.get("path") if isinstance(rec, dict) else None,
+                    "path": rec.get("materialized_path") if isinstance(rec, dict) else None,
                     "index": rec.get("index") if isinstance(rec, dict) else None,
                     "is_anomalous": bool(m is not None and m.any()),
                 }
             )
         offset += bsz
     return frames
-
-
-def per_class_pixel_auroc(
-    scores: list[np.ndarray],
-    class_masks: list[np.ndarray],
-    categories: dict[int, str] | None = None,
-) -> dict[str, float]:
-    """One-vs-background pixel AUROC per non-background class (uses the baked ``class_mask``).
-
-    Pools **raw** scores across frames -- AUROC is rank-based, so per-frame min-max normalization
-    would not be monotonic across frames and would distort the pooled ranking.
-    """
-    from sklearn.metrics import roc_auc_score
-
-    categories = categories or LENTILS_CATEGORIES
-    y_s = np.concatenate([np.asarray(s, np.float32).ravel() for s in scores])
-    cm = np.concatenate([np.asarray(c).ravel() for c in class_masks])
-    out: dict[str, float] = {}
-    for cid, cname in categories.items():
-        if cid == 0:
-            continue
-        cls_pixels = cm == cid
-        if not cls_pixels.any():
-            continue
-        # one-vs-background: positives = this class, negatives = background (exclude other classes)
-        keep = cls_pixels | (cm == 0)
-        out[cname] = float(roc_auc_score(cls_pixels[keep].astype(int), y_s[keep]))
-    return out
 
 
 def plot_per_class_auroc_bar(

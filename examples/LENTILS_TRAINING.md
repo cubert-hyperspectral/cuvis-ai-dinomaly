@@ -69,7 +69,7 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 
 - A **CUDA GPU** is required (~148 M params, ~592 MB saved pipeline).
 - Set `CUVIS=/lib/cuvis` (path to the Cuvis SDK) in the environment.
-- The Dinomaly plugin is registered from `examples/plugins.yaml` (the scripts do this themselves).
+- The Dinomaly plugin is registered from `configs/plugins/dinomaly.yaml` (the scripts do this themselves).
 
 ---
 

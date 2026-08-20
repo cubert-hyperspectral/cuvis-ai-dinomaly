@@ -11,11 +11,11 @@ uv sync --no-sources --extra dev
 # Fast test suite — must be green before tagging
 uv run --no-sources --extra dev pytest tests/ -m "not slow" -v --tb=short
 
-# Manifest smoke test — confirm NodeRegistry can load the plugin (3 nodes)
+# Manifest smoke test — confirm NodeRegistry can load the plugin (5 nodes)
 uv run --no-sources --extra dev python -c "
 from cuvis_ai_core.utils.node_registry import NodeRegistry
 r = NodeRegistry()
-r.register_plugin('examples/plugins.yaml')
+r.register_plugin('configs/plugins/dinomaly.yaml')
 print(sorted(r.list_plugins()))
 "
 # Expected: ['dinomaly']
@@ -24,7 +24,7 @@ print(sorted(r.list_plugins()))
 ## 2. Confirm release metadata
 
 - `pyproject.toml`:
-  - `project.version = "X.Y.Z"` matches the intended tag
+  - version is setuptools-scm dynamic: the tag IS the version (no `project.version` to edit)
   - `project.name = "cuvis-ai-dinomaly"`
   - `project.license = "Apache-2.0"`
 - `CHANGELOG.md`: `## X.Y.Z - YYYY-MM-DD` section exists and is complete (no stale "Unreleased" content)
@@ -50,18 +50,22 @@ git tag -a vX.Y.Z -m "cuvis-ai-dinomaly vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The `release.yml` workflow fires on the tag push and:
-- Validates tests + lint
-- Runs security scanning
-- Builds the wheel and checks tag == package version
-- Creates a GitHub release with the CHANGELOG section as release notes
+Releases are manual — no workflow fires on the tag push (the old `release.yml` was removed in
+0.1.5; the plugin is distributed via git tags referenced from cuvis-ai plugin manifests). After
+pushing the tag, create the GitHub release yourself with the matching CHANGELOG section as notes:
+
+```bash
+gh release create vX.Y.Z --title vX.Y.Z --notes-file <extracted CHANGELOG section> --verify-tag
+```
 
 ## 6. Validate git-tag manifest install
 
 After the tag is pushed, confirm the plugin loads from the git-tag manifest (not just local path):
 
 ```bash
-# From the cuvis-ai repo (or any clean venv with cuvis-ai-core installed)
+# Run from a checkout of the cuvis-ai repo (or any clean venv with cuvis-ai-core installed).
+# Note: this loads the CUVIS-AI repo's configs/plugins/dinomaly.yaml (repo + tag form), which is
+# a different file from this repo's local-path configs/plugins/dinomaly.yaml.
 uv run python -c "
 from cuvis_ai_core.utils.node_registry import NodeRegistry
 r = NodeRegistry()

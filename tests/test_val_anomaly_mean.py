@@ -50,3 +50,15 @@ def test_explicit_reset_clears_state() -> None:
 def test_stage_filter_val_test_only() -> None:
     node = ValNormalAnomalyMean()
     assert set(node.execution_stages) == {ExecutionStage.VAL, ExecutionStage.TEST}
+
+
+def test_empty_batch_keeps_running_mean() -> None:
+    """An empty batch adds nothing to the running mean and never divides by zero."""
+    node = ValNormalAnomalyMean()
+    node.forward(anomaly_score=torch.tensor([0.2, 0.4]), context=_ctx(batch_idx=0))
+    out = node.forward(anomaly_score=torch.tensor([]), context=_ctx(batch_idx=1))
+    assert _mean(out) == pytest.approx(0.3)  # unchanged by the empty batch
+
+    fresh = ValNormalAnomalyMean()
+    out = fresh.forward(anomaly_score=torch.tensor([]), context=_ctx(batch_idx=0))
+    assert _mean(out) == 0.0  # 0.0 / max(0, 1), no ZeroDivisionError

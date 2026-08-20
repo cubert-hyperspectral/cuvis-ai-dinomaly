@@ -58,7 +58,7 @@ def build_pipeline_and_datamodule(
     band_mode: Literal["rgb", "cir"],
 ) -> tuple[CuvisPipeline, object, MinMaxNormalizer, GradientTrainer]:
     """Match ``examples/dinomaly_multifile_train_common.py`` graph construction."""
-    plugins_manifest = Path(__file__).resolve().parent / "plugins.yaml"
+    plugins_manifest = Path(__file__).resolve().parents[1] / "configs" / "plugins" / "dinomaly.yaml"
     registry = NodeRegistry()
     registry.register_plugin(str(plugins_manifest))
     DinomalyDetector = NodeRegistry.get("cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector")
