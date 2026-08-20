@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 0.6.1 - 2026-08-20
+
+- Removed the dead `[tool.uv.sources]` / `[[tool.uv.index]]` torch cu128 configuration: torch is not a direct dependency of this package and the committed lock (generated with --no-sources) resolves it from PyPI, so the tables had no effect anywhere. Composed child environments receive the host-mirrored torch build from cuvis-ai-core >= 0.12.1.
+
 ## 0.6.0 - 2026-08-20
 
 - Adopted the dataloader's unified `universe.csv` vocabulary: the npz universe input's `path` column is renamed `materialized_path`, and the cu3s backend takes `universe_csv` (was `splits_csv`), matching the dataloader change that gives `cu3s_multi` and `npz_multi` one shared column set. `notebooks/lentils_anomaly/utils.py` reads `materialized_path`; REPRODUCTION.md and LENTILS_TRAINING.md document the shared vocabulary.
