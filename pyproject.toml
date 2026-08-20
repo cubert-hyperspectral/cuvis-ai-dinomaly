@@ -41,8 +41,10 @@ dependencies = [
     # eagerly imports the proprietary Cuvis SDK (cuvis_il sys.exit / native libs)
     # at module load. Plugins should target cuvis-ai-core + cuvis-ai-schemas
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
-    "cuvis-ai-core>=0.11.2",
-    "cuvis-ai-schemas>=0.8.0",
+    # core 0.12.x carries the `Predictor.predict(stage=..., collect_ports=...)` APIs the
+    # inference tutorials use; schemas 0.9.0 is the matching contracts release.
+    "cuvis-ai-core>=0.12.1",
+    "cuvis-ai-schemas>=0.9.0",
     "anomalib==2.1.0",
     "kornia==0.6.12",
     "numpy>=1.20.0",
@@ -68,18 +70,24 @@ dev = [
     "bandit[toml]>=1.7.5",
     "twine>=6.2.0",
 ]
-# The example scripts (examples/) import the high-level `cuvis-ai` node library and the
-# `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.9.0 dropped the cuvis SDK, so the examples
-# pull no SDK. The tutorials wire `AnomalyDataNode` and read its `class_mask` port; both landed in
-# cuvis-ai 0.11.1 (the generalisation of `LentilsAnomalyDataNode` into `AnomalyDataNode` plus the
-# class_mask input/output that the per-frame `PerClassAnomalyAUROC` metric consumes), so the floor
-# is >=0.11.1. cuvis-ai-dataloader 0.4.0 carries the `MultiNpzDataModule` (`npz_multi`) the
-# multifile trainers load and emits the per-frame `class_mask` batch key that node reads (on 0.3.0
-# that key is absent and the per-class section no-ops); base install is SDK-free; the `[cu3s]` extra
-# for cu3s runs is provisioned via configs/plugins/cuvis_ai_dataloader.yaml, not pinned here.
+# The example scripts (examples/) and tutorial notebooks import the high-level `cuvis-ai` node
+# library and the `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.9.0 dropped the cuvis SDK, so
+# the examples pull no SDK. cuvis-ai 0.12.0 is the current release of the node library the
+# tutorials wire (`AnomalyDataNode` with the `class_mask` port included). cuvis-ai-dataloader
+# 0.5.0 carries `convert_universe`, the unified `universe.csv` vocabulary (`materialized_path`
+# column), and the `MultiNpzDataModule` (`npz_multi`) batch contract the tutorials read; base
+# install is SDK-free; the dataloader's `[cu3s]` (cuvis SDK reader) and `[coco]` (COCO
+# rasterization) extras are required here because the tutorials provision data inline via
+# `convert_split_manifest` / `convert_universe` (gRPC runs still provision the plugin via
+# configs/plugins/cuvis_ai_dataloader.yaml instead). pandas / matplotlib / huggingface-hub are
+# imported directly by the tutorial notebooks and their utils, so they are declared here rather
+# than relied on as transitives.
 examples = [
-    "cuvis-ai>=0.11.1",
-    "cuvis-ai-dataloader>=0.4.0",
+    "cuvis-ai>=0.12.0",
+    "cuvis-ai-dataloader[cu3s,coco]>=0.5.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.8.0",
+    "huggingface-hub>=0.23.0",
 ]
 
 [project.urls]
@@ -121,7 +129,6 @@ ignore = ["ANN401", "E501"]
 "tests/**" = ["ANN201", "ANN202", "ANN204"]
 # Hydra entrypoints prepend examples/ to sys.path before importing the shared module.
 "examples/train_dinomaly_*_multifile.py" = ["E402"]
-"examples/train_dinomaly_cir_multifile_last_eval.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
