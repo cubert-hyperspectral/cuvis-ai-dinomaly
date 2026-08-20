@@ -100,21 +100,14 @@ Changelog = "https://github.com/cubert-hyperspectral/cuvis-ai-dinomaly/blob/main
 include = ["cuvis_ai_dinomaly*"]
 
 [tool.uv.sources]
-# Local editable overrides for internal development only.
-# Release installs from Git tags / manifests resolve dependencies from normal indexes.
-# NOTE: uv.lock is generated with --no-sources; CI uses --locked --no-sources.
-# Local dev: uv sync (no --locked) uses these overrides.
-torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+# torch flavour in composed child environments is mirrored from the host by
+# cuvis-ai-core >= 0.12.1 (see the cuvis-ai plugin-development docs); this repo
+# does not pin a torch index: torch is not a direct dependency and the committed
+# lock resolves it from PyPI, so an index pin here would bind nothing.
 # cuvis-ai-schemas = { path = "../../cuvis-ai-schemas/cuvis-ai-schemas", editable = true }
 # cuvis-ai-core = { path = "../../cuvis-ai-core/cuvis-ai-core", editable = true }
 # cuvis-ai = { path = "../../cuvis-ai/cuvis-ai", editable = true }
 # cuvis-ai-dataloader = { path = "../../cuvis-ai-dataloader/cuvis-ai-dataloader", editable = true }
-
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
 
 [tool.ruff]
 target-version = "py311"
