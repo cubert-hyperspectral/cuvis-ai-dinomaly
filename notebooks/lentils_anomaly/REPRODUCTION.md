@@ -31,18 +31,14 @@ shown). Provisioning follows the standard Cuvis.AI install (canonical docs:
 
 ```bash
 git clone <cuvis-ai-dinomaly>
-git clone <cuvis-ai-dataloader>                       # alongside; [tool.uv.sources] points at it
 cd cuvis-ai-dinomaly
-uv sync --extra examples                              # framework + torch (cu128) + anomalib + cuvis-ai
-uv pip install -e '../cuvis-ai-dataloader[cu3s,coco]' # cu3s reader + COCO labeler + cuvis bindings
-huggingface-cli login                                 # HF token for the dataset download
+uv sync --extra examples                                 # framework + torch (cu128) + anomalib + cuvis-ai
+uv pip install 'cuvis-ai-dataloader[cu3s,coco]>=0.5.0'   # cu3s reader + COCO labeler + cuvis bindings
+huggingface-cli login                                    # HF token for the dataset download
 # point CUVIS at the SDK dir (the dir containing libcuvis):
 #   bash:        export CUVIS=/path/to/cuvis-sdk
 #   PowerShell:  $env:CUVIS = "C:\path\to\cuvis-sdk"   (or persist: setx CUVIS "C:\path\to\cuvis-sdk")
 ```
-
-(Once cuvis-ai-dataloader releases with the converter + `universe_csv`, swap the editable install
-for `uv pip install 'cuvis-ai-dataloader[cu3s,coco]>=<version>'` and drop the local clone.)
 
 **2. Download + convert from HF → per-frame NPZ**
 
@@ -77,7 +73,7 @@ uv pip install jupyterlab       # notebook UI (kept out of the package deps)
 uv run --no-sync jupyter lab    # then open notebooks/lentils_anomaly/lentils_rgb_train_tutorial.ipynb
 ```
 
-- **`--no-sync` matters:** a plain `uv run` re-syncs from the lock and would uninstall the editable
+- **`--no-sync` matters:** a plain `uv run` re-syncs from the lock and would uninstall the
   `[cu3s,coco]` extra and `jupyterlab` (neither is a package dependency). Running Jupyter from the
   project venv this way also means the default kernel already sees `cuvis_ai*` (no `ipykernel`
   registration).
@@ -104,11 +100,11 @@ See *Scripts* below for the full-fidelity knobs and the learnable-Concrete varia
 
 | package | version |
 |---|---|
-| cuvis-ai | ≥ 0.10 |
-| cuvis-ai-core | ≥ 0.11 |
-| cuvis-ai-schemas | ≥ 0.8 |
-| cuvis-ai-dataloader | with the `universe_csv` split model (provides `MultiNpzDataModule` / `npz_multi`) |
-| anomalib | 2.1 |
+| cuvis-ai | ≥ 0.12.0 |
+| cuvis-ai-core | ≥ 0.12.1 |
+| cuvis-ai-schemas | ≥ 0.9.0 |
+| cuvis-ai-dataloader | ≥ 0.5.0 (the `universe_csv` split model; provides `MultiNpzDataModule` / `npz_multi`) |
+| anomalib | 2.1.0 |
 
 A CUDA GPU is required (DINOv2 reg ViT-B/14 encoder, ~148 M params, ~592 MB pipeline).
 
@@ -154,7 +150,7 @@ reader stack (`cuvis` SDK + the `[cu3s,coco]` extra); training/inference on the 
 ## Notebooks (pedagogical)
 
 In `notebooks/lentils_anomaly/`. Run from that folder (they import the sibling `utils.py` and the
-repo's `examples/plugins.yaml`); see *Reproduce from scratch → 3a* for the Jupyter launch. Every
+repo's `configs/plugins/dinomaly.yaml`); see *Reproduce from scratch → 3a* for the Jupyter launch. Every
 knob is a plain variable at the top of each notebook's setup cell (no env vars).
 
 - `lentils_rgb_train_tutorial.ipynb` — fixed-wavelength RGB selector (650 / 550 / 450 nm).
