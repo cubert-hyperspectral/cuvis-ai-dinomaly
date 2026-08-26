@@ -98,3 +98,69 @@ def test_stage_filter_val_test_only() -> None:
     assert ExecutionStage.VAL in node.execution_stages
     assert ExecutionStage.TEST in node.execution_stages
     assert ExecutionStage.TRAIN not in node.execution_stages
+
+
+# --- pooled epoch-end reduction (issue #6) -----------------------------------------------
+
+
+def _spatial_batch(scores_hw: torch.Tensor, mask_hw: torch.Tensor):
+    """Wrap [H, W] score + bool mask into the node's [B, H, W, 1] ports + an image score."""
+    scores = scores_hw[None, :, :, None].float()
+    targets = mask_hw[None, :, :, None].bool()
+    anomaly_score = scores.flatten(1).max(dim=1).values
+    return scores, targets, anomaly_score
+
+
+def test_pooled_metric_names_declared() -> None:
+    """The trainer keys off POOLED_METRIC_NAMES to skip per-batch logging of these names."""
+    assert AnomalyAUROCMetrics.POOLED_METRIC_NAMES == frozenset({"auroc_pixel", "auroc_image"})
+
+
+def test_pooled_metrics_empty_before_any_batch() -> None:
+    """Nothing to log for a run that never produced scores."""
+    assert AnomalyAUROCMetrics(thresholds=200).pooled_metrics() == {}
+
+
+def test_pooled_compute_is_exact_not_per_batch_mean() -> None:
+    """pooled_metrics() gives the exact pooled AUROC, not the biased per-batch mean.
+
+    Batch A is an all-normal frame -> its running AUROC is undefined and torchmetrics
+    returns 0.0, which poisons a per-batch mean (the issue-#6 failure). The pooled
+    accumulator across A + B is unaffected.
+    """
+    torch.manual_seed(0)
+    node = AnomalyAUROCMetrics(thresholds=200)
+
+    a_scores, a_mask = torch.rand(8, 8), torch.zeros(8, 8, dtype=torch.bool)
+    b_scores = torch.cat([torch.rand(4, 8) + 3.0, torch.rand(4, 8)], dim=0)
+    b_mask = torch.zeros(8, 8, dtype=torch.bool)
+    b_mask[:4, :] = True
+
+    running = []
+    for i, (s, m) in enumerate([(a_scores, a_mask), (b_scores, b_mask)]):
+        out = node.forward(*_spatial_batch(s, m), context=_ctx(ExecutionStage.TEST, batch_idx=i))
+        running.append({x.name: x.value for x in out["metrics"]}["auroc_pixel"])
+
+    ref = BinaryAUROC(thresholds=200)
+    ref.update(
+        torch.sigmoid(torch.cat([a_scores.flatten(), b_scores.flatten()])),
+        torch.cat([a_mask.flatten(), b_mask.flatten()]).long(),
+    )
+
+    pooled = node.pooled_metrics()
+    assert set(pooled) == {"auroc_pixel", "auroc_image"}
+    node_pooled = float(pooled["auroc_pixel"].compute())
+    assert node_pooled == pytest.approx(float(ref.compute()), abs=1e-6)
+    assert node_pooled > sum(running) / len(running) + 0.2
+
+
+def test_pooled_metrics_reset_on_new_epoch() -> None:
+    """The (stage, epoch) boundary clears the pooled accumulator."""
+    node = AnomalyAUROCMetrics(thresholds=200)
+    s = torch.cat([torch.rand(4, 8) + 3.0, torch.rand(4, 8)], dim=0)
+    m = torch.zeros(8, 8, dtype=torch.bool)
+    m[:4, :] = True
+    node.forward(*_spatial_batch(s, m), context=_ctx(ExecutionStage.TEST, epoch=0))
+    first = float(node.pooled_metrics()["auroc_pixel"].compute())
+    node.forward(*_spatial_batch(s, m), context=_ctx(ExecutionStage.TEST, epoch=1))
+    assert float(node.pooled_metrics()["auroc_pixel"].compute()) == pytest.approx(first, abs=1e-6)

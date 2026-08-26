@@ -7,14 +7,15 @@ via ``update()`` across batches and reset on the ``(stage, epoch)`` boundary. Ea
 forward emits the *running* AUROC as a :class:`~cuvis_ai_schemas.execution.Metric`. No
 bespoke Lightning callback is needed.
 
-This is a **training-time monitoring** metric, not the authoritative score. The trainer
-logs each ``Metric.value`` as a float per batch and Lightning reduces per-epoch with its
-``on_epoch`` default (mean), so the reported epoch scalar is the *mean of the per-batch
-running AUROCs* — an approximation of, not equal to, the exact pooled AUROC. Core 0.10
-exposes no epoch-end hook and ``Context`` has no last-batch flag, so the node cannot force
-a single exact compute through this channel. The authoritative whole-dataset AUROC is
-computed separately (sklearn ``roc_auc_score`` over all pooled frames in the bedding eval
-script); that is what the published metrics use.
+The per-batch ``Metric.value`` emitted by ``forward`` is a *running* AUROC — a
+batch-size-sensitive approximation if mean-reduced over the epoch. The authoritative epoch
+value comes from :meth:`pooled_metrics`: the node lists ``auroc_pixel`` / ``auroc_image`` in
+``POOLED_METRIC_NAMES``, so the trainer skips their per-batch float logging and instead logs
+the live ``BinaryAUROC`` objects with ``on_epoch=True``, and Lightning does one pooled
+``compute()`` + ``reset()`` at epoch end — exact and batch-size-invariant. This mirrors
+``cuvis_ai.node.metrics.AnomalyDetectionMetrics`` and closes the reporting gap tracked in
+issue #6. The per-batch values remain available on the ``metrics`` port for live monitoring
+(e.g. the TensorBoard node).
 
 Scores are passed through ``sigmoid`` before the binned metric so the thresholds span
 ``[0, 1]``; AUROC is rank-invariant under a monotonic transform, so the value is
@@ -38,7 +39,7 @@ Until then it stays here as a plugin-local monitoring metric.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import torch
 from cuvis_ai_schemas.enums import NodeCategory, NodeTag
@@ -62,12 +63,21 @@ class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
 
     Output ports
     ------------
-    metrics : ``list[Metric]`` — running ``auroc_pixel`` / ``auroc_image`` (monitoring;
-        the trainer mean-reduces these per epoch — see the module docstring).
+    metrics : ``list[Metric]`` — running ``auroc_pixel`` / ``auroc_image`` per batch (for
+        live monitoring, e.g. the TensorBoard node). The authoritative epoch value is the
+        pooled ``compute()`` the trainer logs from :meth:`pooled_metrics` at epoch end.
     """
 
     _category = NodeCategory.METRIC
     _tags = frozenset({NodeTag.EVALUATION, NodeTag.ANOMALY})
+
+    # auroc_pixel / auroc_image accumulate across the whole epoch and must be reduced by a
+    # single pooled compute() at epoch end, not by averaging the per-batch running values
+    # (batch-size-sensitive; badly biased at batch_size=1). The trainer skips these names in
+    # per-batch logging and instead logs the live torchmetrics objects from pooled_metrics()
+    # with on_epoch=True, so Lightning does the pooled compute()+reset() natively. Mirrors
+    # cuvis_ai.node.metrics.AnomalyDetectionMetrics.
+    POOLED_METRIC_NAMES: ClassVar[frozenset[str]] = frozenset({"auroc_pixel", "auroc_image"})
 
     INPUT_SPECS = {
         "scores": PortSpec(
@@ -95,8 +105,8 @@ class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
     def __init__(self, thresholds: int = 200, **kwargs: Any) -> None:
         super().__init__(thresholds=thresholds, **kwargs)
         # Histogram-based AUROC: O(thresholds) state, accumulated across batches and reset
-        # only at the (stage, epoch) boundary, so each forward's value is a running AUROC.
-        # The trainer mean-reduces these per epoch (monitoring) — see the module docstring.
+        # only at the (stage, epoch) boundary. forward() emits the running value per batch;
+        # the pooled epoch value is logged via pooled_metrics() (see POOLED_METRIC_NAMES).
         self.pixel_auroc = BinaryAUROC(thresholds=thresholds)
         self.image_auroc = BinaryAUROC(thresholds=thresholds)
 
@@ -139,3 +149,17 @@ class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
                 ),
             ]
         }
+
+    def pooled_metrics(self) -> dict[str, BinaryAUROC]:
+        """Live torchmetrics objects for the epoch-pooled AUROCs, keyed by metric name.
+
+        ``auroc_pixel`` / ``auroc_image`` accumulate across the epoch (reset only at the
+        ``(stage, epoch)`` boundary), so the trainer logs these objects with ``on_epoch=True``
+        and Lightning computes the single pooled AUROC and resets at epoch end — exact and
+        batch-size-invariant, unlike the per-batch running values emitted in ``forward``.
+        Returns an empty mapping until the first batch has been seen, so nothing is logged
+        for a run that never produced scores.
+        """
+        if self._last_key is None:
+            return {}
+        return {"auroc_pixel": self.pixel_auroc, "auroc_image": self.image_auroc}
