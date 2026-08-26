@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 0.6.2 - 2026-08-26
+
+- `AnomalyAUROCMetrics` now opts into the trainer's pooled epoch-end reduction: it declares `POOLED_METRIC_NAMES = {"auroc_pixel", "auroc_image"}` and exposes `pooled_metrics()` returning the live `BinaryAUROC` accumulators, so `GradientTrainer` (cuvis-ai-core >= 0.10.1) skips their per-batch float logging and logs the metric objects with `on_epoch=True`, making the reported epoch value one exact pooled `compute()` instead of the batch-size-sensitive mean of per-batch running values (badly biased at `batch_size=1`, where early single-class batches contribute 0.0; measured ~0.82 reported vs 0.994 true pixel AUROC on the lentils run). The per-batch running values stay on the `metrics` port for live monitoring, and the 0.3.0 "monitoring-only" caveat no longer applies to the trainer-reported value. `PerClassAnomalyAUROC` is unchanged (read via `compute()`, not the trainer table).
+
 ## 0.6.1 - 2026-08-20
 
 - Removed the dead `[tool.uv.sources]` / `[[tool.uv.index]]` torch cu128 configuration: torch is not a direct dependency of this package and the committed lock (generated with --no-sources) resolves it from PyPI, so the tables had no effect anywhere. Composed child environments receive the host-mirrored torch build from cuvis-ai-core >= 0.12.1.
