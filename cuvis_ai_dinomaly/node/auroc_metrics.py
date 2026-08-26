@@ -24,17 +24,15 @@ unchanged.
 UPSTREAM USAGE (deferred move): the long-term home is ``cuvis-ai``
 ``cuvis_ai/node/metrics.py``, next to ``AnomalyDetectionMetrics`` (whose streaming
 pattern this mirrors), so *any* pipeline — not just Dinomaly — can wire a streaming
-pixel/image AUROC node without depending on this plugin. Two gates before moving it:
+pixel/image AUROC node without depending on this plugin. One gate before moving it:
+a cuvis-ai release shipping the node at the upstream import path, then a re-point of
+already-saved pipelines (incl. the published HF bedding model) whose YAML references
+``cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics`` — the same re-point dance
+as the selector retirement (cuvis-ai#39). The former second gate, a proper epoch-level
+reduction upstream, is done: the ``POOLED_METRIC_NAMES`` / :meth:`pooled_metrics` opt-in
+used here carries over unchanged on the move.
 
-1. It needs a cuvis-ai release shipping the node at the upstream import path, then a
-   re-point of already-saved pipelines (incl. the published HF bedding model) whose YAML
-   references ``cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics`` — the same
-   re-point dance as the selector retirement (cuvis-ai#39).
-2. Ideally land it with a proper epoch-level reduction upstream (an epoch-end hook, or a
-   last-batch flag on ``Context``) so the reported epoch value is the exact pooled AUROC
-   rather than the per-batch mean noted above.
-
-Until then it stays here as a plugin-local monitoring metric.
+Until then it stays here as a plugin-local metric node.
 """
 
 from __future__ import annotations
