@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## 0.6.3 - 2026-08-31
+
+- `DinomalyDetector` now aligns the returned anomaly map to the input pixel grid (new `align_map_to_input` flag, default on). anomalib's `DinomalyModel` upsamples the low-resolution patch anomaly map to `image_size` with `align_corners=True`, while every other resize on the node's path (the preprocessing `Resize` and the final scores-to-native `F.interpolate`) is area-based; the convention mismatch displaced the returned map radially outward: zero at the image centre, growing toward the edges (12.3 px removed at 457 px radius on the lentils champion checkpoint). A scoped context manager forces `align_corners=False` in anomalib's internal upsample for the duration of the model call; it changes only where scores land, not their values. Because every returned map shifts slightly, a deployed decider `image_threshold` tuned on the old maps is worth a re-check; set `align_map_to_input: false` to reproduce the previous behaviour. The proxy is a single module-level instance (not per-call) so `torch.compile` guard identity stays stable under `compile_mode` / `fast_inference=True`, and the flag is forwarded into the node's hparams so the opt-out survives pipeline save/restore.
+
 ## 0.6.2 - 2026-08-26
 
 - `AnomalyAUROCMetrics` now opts into the trainer's pooled epoch-end reduction: it declares `POOLED_METRIC_NAMES = {"auroc_pixel", "auroc_image"}` and exposes `pooled_metrics()` returning the live `BinaryAUROC` accumulators, so `GradientTrainer` (cuvis-ai-core >= 0.10.1) skips their per-batch float logging and logs the metric objects with `on_epoch=True`, making the reported epoch value one exact pooled `compute()` instead of the batch-size-sensitive mean of per-batch running values (badly biased at `batch_size=1`, where early single-class batches contribute 0.0; measured ~0.82 reported vs 0.994 true pixel AUROC on the lentils run). The per-batch running values stay on the `metrics` port for live monitoring, and the 0.3.0 "monitoring-only" caveat no longer applies to the trainer-reported value. `PerClassAnomalyAUROC` is unchanged (read via `compute()`, not the trainer table).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterator
 from typing import Any
 
 import torch
@@ -14,6 +15,70 @@ from cuvis_ai_schemas.pipeline import PortSpec
 from loguru import logger
 from torch import Tensor
 from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize
+
+
+class _AreaAlignF:
+    """Stand-in for anomalib torch_model's module-global ``F`` (``torch.nn.functional``).
+
+    Rewrites ``align_corners=True`` interpolate calls to ``align_corners=False`` and
+    delegates everything else to the real module. A single module-level instance is
+    installed/removed by ``_area_anomaly_map_upsample`` rather than a fresh object per
+    call: the anomaly-map upsample sits inside the region wrapped by ``torch.compile``
+    (``compile_mode`` / ``fast_inference``), and Dynamo guards on the identity of the
+    globals it traced through -- a new proxy object every forward would fail that guard
+    each call and trigger recompilation.
+    """
+
+    def __init__(self) -> None:
+        # The real torch.nn.functional module; (re)captured on every install.
+        self._real_f: Any = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real_f, name)
+
+    def interpolate(self, *args: Any, **kwargs: Any) -> Tensor:
+        if kwargs.get("align_corners") is True:
+            kwargs = {**kwargs, "align_corners": False}
+        return self._real_f.interpolate(*args, **kwargs)
+
+
+_AREA_ALIGN_F = _AreaAlignF()
+
+
+@contextlib.contextmanager
+def _area_anomaly_map_upsample(enabled: bool) -> Iterator[None]:
+    """Force ``align_corners=False`` in anomalib's patch-grid -> image_size upsample.
+
+    Anomalib's ``DinomalyModel`` upsamples the low-resolution patch anomaly map to
+    ``image_size`` with ``align_corners=True`` (``models/image/dinomaly/torch_model.py``).
+    Every other resize on this node's path -- the preprocessing ``Resize`` and the
+    ``scores`` -> native ``F.interpolate`` below -- is area-based (``align_corners=False``).
+    That True/False mismatch displaces the returned map radially outward: zero at the image
+    centre, up to ~half a patch (about ``image_size / (2 * grid)`` px, ~7 px at 448) at the
+    edges, which is several native pixels once the map is resized back. Forcing the internal
+    upsample to ``align_corners=False`` removes the shift; it changes only *where* the scores
+    land, not their values. Scoped to the model call and restored on exit.
+
+    The swap mutates a module global, so it is process-wide for the duration of the call
+    and not safe under concurrent forwards from multiple threads; pipeline execution is
+    sequential, so this does not arise in practice.
+    """
+    if not enabled:
+        yield
+        return
+    import anomalib.models.image.dinomaly.torch_model as _tm
+
+    real_f = _tm.F
+    if real_f is _AREA_ALIGN_F:  # re-entrant call: proxy already installed
+        yield
+        return
+
+    _AREA_ALIGN_F._real_f = real_f
+    _tm.F = _AREA_ALIGN_F
+    try:
+        yield
+    finally:
+        _tm.F = real_f
 
 
 class DinomalyDetector(Node):
@@ -108,6 +173,7 @@ class DinomalyDetector(Node):
         image_size: int | tuple[int, int] | list[int] = 448,
         crop_size: int | tuple[int, int] | list[int] = 392,
         use_center_crop: bool = True,
+        align_map_to_input: bool = True,
         input_channels: int = 3,
         fast_inference: bool = False,
         use_tf32: bool | None = None,
@@ -217,6 +283,9 @@ class DinomalyDetector(Node):
         self.image_size = _to_hw(image_size, "image_size")
         self.crop_size = _to_hw(crop_size, "crop_size")
         self.use_center_crop = bool(use_center_crop)
+        # Align the returned anomaly map to the input pixel grid (fixes anomalib's
+        # align_corners=True patch upsample; see _area_anomaly_map_upsample). Default on.
+        self.align_map_to_input = bool(align_map_to_input)
         self.input_channels = int(input_channels)
         if self.input_channels <= 0 or self.input_channels % 3 != 0:
             raise ValueError(
@@ -242,6 +311,7 @@ class DinomalyDetector(Node):
             image_size=image_size,
             crop_size=crop_size,
             use_center_crop=use_center_crop,
+            align_map_to_input=align_map_to_input,
             input_channels=input_channels,
             fast_inference=fast_inference,
             use_tf32=use_tf32,
@@ -468,7 +538,8 @@ class DinomalyDetector(Node):
         )
         with torch.no_grad(), autocast_ctx:
             model.eval()
-            pred = model(x)
+            with _area_anomaly_map_upsample(self.align_map_to_input):
+                pred = model(x)
 
         amap = pred.anomaly_map
         if amap.dim() == 3:
