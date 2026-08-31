@@ -17,6 +17,34 @@ from torch import Tensor
 from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize
 
 
+class _AreaAlignF:
+    """Stand-in for anomalib torch_model's module-global ``F`` (``torch.nn.functional``).
+
+    Rewrites ``align_corners=True`` interpolate calls to ``align_corners=False`` and
+    delegates everything else to the real module. A single module-level instance is
+    installed/removed by ``_area_anomaly_map_upsample`` rather than a fresh object per
+    call: the anomaly-map upsample sits inside the region wrapped by ``torch.compile``
+    (``compile_mode`` / ``fast_inference``), and Dynamo guards on the identity of the
+    globals it traced through -- a new proxy object every forward would fail that guard
+    each call and trigger recompilation.
+    """
+
+    def __init__(self) -> None:
+        # The real torch.nn.functional module; (re)captured on every install.
+        self._real_f: Any = None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real_f, name)
+
+    def interpolate(self, *args: Any, **kwargs: Any) -> Tensor:
+        if kwargs.get("align_corners") is True:
+            kwargs = {**kwargs, "align_corners": False}
+        return self._real_f.interpolate(*args, **kwargs)
+
+
+_AREA_ALIGN_F = _AreaAlignF()
+
+
 @contextlib.contextmanager
 def _area_anomaly_map_upsample(enabled: bool) -> Iterator[None]:
     """Force ``align_corners=False`` in anomalib's patch-grid -> image_size upsample.
@@ -30,6 +58,10 @@ def _area_anomaly_map_upsample(enabled: bool) -> Iterator[None]:
     edges, which is several native pixels once the map is resized back. Forcing the internal
     upsample to ``align_corners=False`` removes the shift; it changes only *where* the scores
     land, not their values. Scoped to the model call and restored on exit.
+
+    The swap mutates a module global, so it is process-wide for the duration of the call
+    and not safe under concurrent forwards from multiple threads; pipeline execution is
+    sequential, so this does not arise in practice.
     """
     if not enabled:
         yield
@@ -37,17 +69,12 @@ def _area_anomaly_map_upsample(enabled: bool) -> Iterator[None]:
     import anomalib.models.image.dinomaly.torch_model as _tm
 
     real_f = _tm.F
+    if real_f is _AREA_ALIGN_F:  # re-entrant call: proxy already installed
+        yield
+        return
 
-    class _AreaAlignF:
-        def __getattr__(self, name: str) -> Any:
-            return getattr(real_f, name)
-
-        def interpolate(self, *args: Any, **kwargs: Any) -> Tensor:
-            if kwargs.get("align_corners") is True:
-                kwargs = {**kwargs, "align_corners": False}
-            return real_f.interpolate(*args, **kwargs)
-
-    _tm.F = _AreaAlignF()
+    _AREA_ALIGN_F._real_f = real_f
+    _tm.F = _AREA_ALIGN_F
     try:
         yield
     finally:
@@ -284,6 +311,7 @@ class DinomalyDetector(Node):
             image_size=image_size,
             crop_size=crop_size,
             use_center_crop=use_center_crop,
+            align_map_to_input=align_map_to_input,
             input_channels=input_channels,
             fast_inference=fast_inference,
             use_tf32=use_tf32,
