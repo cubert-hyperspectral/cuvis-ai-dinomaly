@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 - unreleased
+## 0.7.0 - 2026-09-04
 
 - **DINOv2 backbone weights come from the `cubert-gmbh/dinov2` Hugging Face mirror through cuvis-ai-core's weight registry.** `DinomalyDetector` patches anomalib's `DinoV2Loader` so the ViT-B/14 reg4 backbone is materialized from the registry (`ModelWeights.materialize("dinov2_vitb14_reg4", ...)`, commit-pinned and sha256-verified) into the loader's cache dir instead of being downloaded from `dl.fbaipublicfiles.com`; an offline child without provisioned weights gets `ModelWeightsMissingError` naming `download-model download dinov2_vitb14_reg4`. Unmirrored DINOv2 variants keep anomalib's download. Requires cuvis-ai-core 0.16.0 (`cuvis-ai-core[hf]`).
 - **Route the DINOv2 backbone cache through the shared model cache.** When `CUVIS_MODEL_CACHE_DIR` is set (injected by the cuvis-ai-core run spawner), the anomalib `DinoV2Loader` default cache is redirected from its hardcoded CWD-relative `./pre_trained/` to `<cache>/dinov2`, so a sandboxed child finds the backbone instead of re-downloading it every run, and it loads offline once cached.
