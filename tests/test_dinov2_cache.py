@@ -123,3 +123,22 @@ def test_routing_is_idempotent():
     first = dl.DinoV2Loader._download_weights
     route_dinov2_weights_through_core()
     assert dl.DinoV2Loader._download_weights is first
+
+
+def test_redirect_does_not_outlive_the_env_var(monkeypatch, tmp_path):
+    """A loader built after the variable disappears gets anomalib's default again.
+
+    Regression: the redirect used to freeze the target on the class, so a later
+    default construction (another test, a notebook) kept pointing at a stale dir.
+    """
+    from anomalib.models.image.dinomaly.components import dinov2_loader as dl
+
+    monkeypatch.setenv("CUVIS_MODEL_CACHE_DIR", str(tmp_path / "mc"))
+    redirect_dinov2_cache_to_shared()
+    assert dl.DinoV2Loader().cache_dir == tmp_path / "mc" / "dinov2"
+
+    monkeypatch.delenv("CUVIS_MODEL_CACHE_DIR")
+    assert dl.DinoV2Loader().cache_dir == Path("./pre_trained/")
+
+    monkeypatch.setenv("CUVIS_MODEL_CACHE_DIR", str(tmp_path / "other"))
+    assert dl.DinoV2Loader().cache_dir == tmp_path / "other" / "dinov2"

@@ -5,9 +5,11 @@ downloads the DINOv2 backbone from ``dl.fbaipublicfiles.com``. Two contained,
 idempotent patches fix that for Cuvis.AI:
 
 * :func:`redirect_dinov2_cache_to_shared` points the loader's default cache dir
-  at ``$CUVIS_MODEL_CACHE_DIR/dinov2`` when the orchestrator exports that
+  at ``$CUVIS_MODEL_CACHE_DIR/dinov2`` whenever the orchestrator exports that
   variable (the per-run HOME and CWD are wiped, so the default would re-download
-  every run and could never run offline).
+  every run and could never run offline). The variable is read each time a loader
+  is constructed, so a process whose environment changes (tests, long-lived
+  notebooks) never keeps a stale target.
 * :func:`route_dinov2_weights_through_core` replaces the loader's download step:
   the ViT-B/14 reg4 backbone is materialized from cuvis-ai-core's weight registry
   (the ``cubert-gmbh/dinov2`` mirror, commit-pinned and sha256-verified) into the
@@ -44,29 +46,31 @@ def _loader_cls() -> type | None:
     return _dl.DinoV2Loader
 
 
+def shared_dinov2_cache_dir() -> str | None:
+    """Return ``$CUVIS_MODEL_CACHE_DIR/dinov2`` for the current environment, or ``None``."""
+    root = os.environ.get("CUVIS_MODEL_CACHE_DIR")
+    if not root:
+        return None
+    return str(Path(root) / "dinov2")
+
+
 def redirect_dinov2_cache_to_shared() -> None:
     """Point ``DinoV2Loader``'s default cache at ``$CUVIS_MODEL_CACHE_DIR/dinov2``.
 
-    No-op when the env var is unset (local dev keeps anomalib's default) or when
-    anomalib's loader is not importable. Idempotent across calls.
+    Installs the redirect once; every later ``DinoV2Loader()`` construction looks
+    the variable up afresh, so an unset variable leaves anomalib's default in place
+    and a changed one is honored without re-patching. No-op when anomalib's loader
+    is not importable. Idempotent across calls.
     """
-    root = os.environ.get("CUVIS_MODEL_CACHE_DIR")
-    if not root:
-        return
     loader_cls = _loader_cls()
-    if loader_cls is None:
-        return
-
-    # Store/refresh the target so a later env change is honored even after patching.
-    loader_cls._cuvis_shared_cache = str(Path(root) / "dinov2")
-    if getattr(loader_cls, "_cuvis_cache_patched", False):
+    if loader_cls is None or getattr(loader_cls, "_cuvis_cache_patched", False):
         return
 
     _orig_init = loader_cls.__init__
 
     def _patched_init(self, cache_dir: str | Path = _DEFAULT_SENTINEL) -> None:
         if str(cache_dir) == _DEFAULT_SENTINEL:
-            cache_dir = type(self)._cuvis_shared_cache
+            cache_dir = shared_dinov2_cache_dir() or cache_dir
         _orig_init(self, cache_dir)
 
     loader_cls.__init__ = _patched_init
