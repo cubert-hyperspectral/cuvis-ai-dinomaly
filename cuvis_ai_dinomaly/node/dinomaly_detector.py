@@ -326,6 +326,13 @@ class DinomalyDetector(Node):
             **kwargs,
         )
 
+        # Redirect anomalib's DINOv2 backbone cache to the shared model cache
+        # before it downloads (hardcoded CWD-relative ./pre_trained/ otherwise,
+        # wiped per run). No-op when CUVIS_MODEL_CACHE_DIR is unset.
+        from cuvis_ai_dinomaly.node._dinov2_cache import redirect_dinov2_cache_to_shared
+
+        redirect_dinov2_cache_to_shared()
+
         from anomalib.models.image.dinomaly.torch_model import DinomalyModel
 
         model = DinomalyModel(

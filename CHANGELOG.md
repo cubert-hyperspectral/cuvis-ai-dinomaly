@@ -43,6 +43,8 @@
 
 - Raised the `cuvis-ai-core` floor to `>=0.11.2` and `cuvis-ai-schemas` to `>=0.8.0`, matching the flat `TrainingConfig` the trainer already targets. Dependency floors only; no API change.
 
+- **Route the DINOv2 backbone cache through the shared model cache.** When `CUVIS_MODEL_CACHE_DIR` is set (injected by the cuvis-ai-core run spawner), the anomalib `DinoV2Loader` download target is redirected from its hardcoded CWD-relative `./pre_trained/` to `<cache>/dinov2`, so a sandboxed child finds the backbone instead of re-downloading it every run, and it loads offline once cached.
+
 ## 0.4.0 - 2026-07-01
 
 - Moved the NPZ data layer to cuvis-ai-dataloader: deleted `cuvis_ai_dinomaly/data/` (`MultiFileNpzDataset` / `MultiFileNpzDataModule` and the local `_coco_utils` COCO helpers); the generic loader now lives upstream as `cuvis_ai_dataloader.data.MultiNpzDataModule` (`data_module_name: npz_multi`, cuvis-ai-dataloader 0.3.0+). The example scripts and the bedding train notebook import it from there; the batch contract (`cube`, `mask`, `wavelengths`, `mesu_index`) is unchanged. Dropped the never-hit `annotation_json`-to-mask fallback (masks are baked into the NPZ, so the ecosystem keeps a single COCO source in cuvis-ai-dataloader's `coco_labeler`) and the bedding-only `class_mask` batch key (read by no pipeline node).
