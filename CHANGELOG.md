@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## 0.6.4 - 2026-09-04
+
+- The streaming metric base (`ValNormalAnomalyMean`, the AUROC metrics) and `DinomalyTrainLossBridge` declare their execution stages on the class (`EXECUTION_STAGES`, cuvis-ai-core 0.14.1) instead of passing `execution_stages=` to the constructor; `consume_base_kwargs` is no longer used. The example distinctness loss follows. Floors `cuvis-ai-core>=0.14.1`.
 
 ## 0.6.3 - 2026-08-31
 

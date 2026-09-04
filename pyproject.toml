@@ -43,7 +43,7 @@ dependencies = [
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
     # core 0.12.x carries the `Predictor.predict(stage=..., collect_ports=...)` APIs the
     # inference tutorials use; schemas 0.9.0 is the matching contracts release.
-    "cuvis-ai-core>=0.12.1",
+    "cuvis-ai-core>=0.14.1",
     "cuvis-ai-schemas>=0.9.0",
     "anomalib==2.1.0",
     "kornia==0.6.12",
