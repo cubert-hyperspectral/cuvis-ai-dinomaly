@@ -14,7 +14,7 @@ A **[cuvis.ai](https://github.com/cubert-hyperspectral/cuvis-ai) plugin** for [D
 
 - Python 3.11
 - [uv](https://docs.astral.sh/uv/) (Python dependency manager)
-- GPU recommended — DINOv2 encoder weights are downloaded on first run
+- GPU recommended. The DINOv2 encoder weights come from the `cubert-gmbh/dinov2` Hugging Face mirror through cuvis-ai-core's weight registry: provision once with `uv run download-model download dinov2_vitb14_reg4`, or let the node fetch them on first run when online
 
 > **Note**: This plugin depends on `cuvis-ai-core` and `cuvis-ai-schemas` only. It does **not** depend on the high-level `cuvis-ai` package, which avoids transitively importing the proprietary Cuvis SDK at module load.
 

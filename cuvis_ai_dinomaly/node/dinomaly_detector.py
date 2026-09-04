@@ -326,6 +326,18 @@ class DinomalyDetector(Node):
             **kwargs,
         )
 
+        # Before anomalib builds the backbone: point its cache at the shared model
+        # cache (CUVIS_MODEL_CACHE_DIR, wiped per-run CWD otherwise) and serve the
+        # DINOv2 weights from cuvis-ai-core's registry (the cubert-gmbh/dinov2
+        # mirror) instead of downloading them from dl.fbaipublicfiles.com.
+        from cuvis_ai_dinomaly.node._dinov2_cache import (
+            redirect_dinov2_cache_to_shared,
+            route_dinov2_weights_through_core,
+        )
+
+        redirect_dinov2_cache_to_shared()
+        route_dinov2_weights_through_core()
+
         from anomalib.models.image.dinomaly.torch_model import DinomalyModel
 
         model = DinomalyModel(
