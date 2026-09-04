@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 - unreleased
+
+- **DINOv2 backbone weights come from the `cubert-gmbh/dinov2` Hugging Face mirror through cuvis-ai-core's weight registry.** `DinomalyDetector` patches anomalib's `DinoV2Loader` so the ViT-B/14 reg4 backbone is materialized from the registry (`ModelWeights.materialize("dinov2_vitb14_reg4", ...)`, commit-pinned and sha256-verified) into the loader's cache dir instead of being downloaded from `dl.fbaipublicfiles.com`; an offline child without provisioned weights gets `ModelWeightsMissingError` naming `download-model download dinov2_vitb14_reg4`. Unmirrored DINOv2 variants keep anomalib's download. Requires cuvis-ai-core 0.16.0 (`cuvis-ai-core[hf]`).
+- **Route the DINOv2 backbone cache through the shared model cache.** When `CUVIS_MODEL_CACHE_DIR` is set (injected by the cuvis-ai-core run spawner), the anomalib `DinoV2Loader` default cache is redirected from its hardcoded CWD-relative `./pre_trained/` to `<cache>/dinov2`, so a sandboxed child finds the backbone instead of re-downloading it every run, and it loads offline once cached.
+
 ## 0.6.4 - 2026-09-04
 
 - The streaming metric base (`ValNormalAnomalyMean`, the AUROC metrics) and `DinomalyTrainLossBridge` declare their execution stages on the class (`EXECUTION_STAGES`, cuvis-ai-core 0.14.1) instead of passing `execution_stages=` to the constructor; `consume_base_kwargs` is no longer used. The example distinctness loss follows. Floors `cuvis-ai-core>=0.14.1`.
@@ -42,8 +47,6 @@
 ## 0.4.1 - 2026-07-17
 
 - Raised the `cuvis-ai-core` floor to `>=0.11.2` and `cuvis-ai-schemas` to `>=0.8.0`, matching the flat `TrainingConfig` the trainer already targets. Dependency floors only; no API change.
-
-- **Route the DINOv2 backbone cache through the shared model cache.** When `CUVIS_MODEL_CACHE_DIR` is set (injected by the cuvis-ai-core run spawner), the anomalib `DinoV2Loader` download target is redirected from its hardcoded CWD-relative `./pre_trained/` to `<cache>/dinov2`, so a sandboxed child finds the backbone instead of re-downloading it every run, and it loads offline once cached.
 
 ## 0.4.0 - 2026-07-01
 
