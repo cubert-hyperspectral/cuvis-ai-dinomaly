@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 import torch
 from cuvis_ai_schemas.enums import ExecutionStage
@@ -164,3 +166,160 @@ def test_pooled_metrics_reset_on_new_epoch() -> None:
     first = float(node.pooled_metrics()["auroc_pixel"].compute())
     node.forward(*_spatial_batch(s, m), context=_ctx(ExecutionStage.TEST, epoch=1))
     assert float(node.pooled_metrics()["auroc_pixel"].compute()) == pytest.approx(first, abs=1e-6)
+
+
+# --- pixel_stride subsampling ------------------------------------------------------------
+
+
+def _spy_update(monkeypatch: pytest.MonkeyPatch, metric: BinaryAUROC) -> list[tuple]:
+    """Record every (preds, target) pair passed to ``metric.update`` and forward the call."""
+    calls: list[tuple] = []
+    original = metric.update
+
+    def recording_update(preds: torch.Tensor, target: torch.Tensor):
+        calls.append((preds, target))
+        return original(preds, target)
+
+    monkeypatch.setattr(metric, "update", recording_update)
+    return calls
+
+
+def _random_batch(b: int, h: int, w: int, seed: int = 0):
+    """A [B, H, W, 1] score/mask pair with both classes present plus its image scores."""
+    torch.manual_seed(seed)
+    scores = torch.randn(b, h, w, 1)
+    targets = scores > 0.0
+    anomaly_score = scores.flatten(1).max(dim=1).values
+    return scores, targets, anomaly_score
+
+
+def test_pixel_stride_defaults_to_one_and_is_an_hparam() -> None:
+    """Default is no subsampling, and the value lands in hparams for save/restore."""
+    node = AnomalyAUROCMetrics()
+    assert node.pixel_stride == 1
+    assert node.hparams["pixel_stride"] == 1
+
+
+def test_pixel_stride_round_trips_through_hparams() -> None:
+    """A non-default stride survives the hparams round trip a pipeline yaml goes through."""
+    node = AnomalyAUROCMetrics(thresholds=64, pixel_stride=4)
+    assert node.hparams["thresholds"] == 64
+    assert node.hparams["pixel_stride"] == 4
+    restored = AnomalyAUROCMetrics(**node.hparams)
+    assert restored.pixel_stride == 4
+    assert restored.hparams == node.hparams
+
+
+def test_pixel_update_element_count_is_strided(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pixel accumulator sees ceil(H/s) * ceil(W/s) * B elements, not the full frame."""
+    node = AnomalyAUROCMetrics(thresholds=32, pixel_stride=3)
+    pixel_calls = _spy_update(monkeypatch, node.pixel_auroc)
+    image_calls = _spy_update(monkeypatch, node.image_auroc)
+
+    b, h, w = 2, 9, 11
+    scores, targets, anomaly_score = _random_batch(b, h, w)
+    node.forward(scores=scores, targets=targets, anomaly_score=anomaly_score, context=_ctx())
+
+    expected = math.ceil(h / 3) * math.ceil(w / 3) * b
+    preds, target = pixel_calls[0]
+    assert preds.numel() == expected
+    assert target.numel() == expected
+    assert expected < b * h * w  # the stride actually removed work
+    # The image pair is never subsampled: one score and one label per frame.
+    img_preds, img_target = image_calls[0]
+    assert img_preds.numel() == b and img_target.numel() == b
+
+
+@pytest.mark.parametrize("stride", [1, 2, 3, 5])
+def test_pixel_update_bounded_for_every_stride(
+    stride: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Odd H/W: the element count matches the ceil bound exactly for each stride."""
+    node = AnomalyAUROCMetrics(thresholds=32, pixel_stride=stride)
+    pixel_calls = _spy_update(monkeypatch, node.pixel_auroc)
+
+    b, h, w = 3, 7, 13
+    scores, targets, anomaly_score = _random_batch(b, h, w, seed=stride)
+    node.forward(scores=scores, targets=targets, anomaly_score=anomaly_score, context=_ctx())
+
+    expected = math.ceil(h / stride) * math.ceil(w / stride) * b
+    preds, target = pixel_calls[0]
+    assert preds.numel() == expected
+    assert target.numel() == expected
+
+
+def test_image_label_comes_from_the_full_mask(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A lone anomalous pixel the stride skips still yields image label 1."""
+    node = AnomalyAUROCMetrics(thresholds=32, pixel_stride=2)
+    pixel_calls = _spy_update(monkeypatch, node.pixel_auroc)
+    image_calls = _spy_update(monkeypatch, node.image_auroc)
+
+    scores = torch.zeros(1, 6, 6, 1)
+    targets = torch.zeros(1, 6, 6, 1, dtype=torch.bool)
+    targets[0, 1, 1, 0] = True  # odd row/column: stride 2 samples 0, 2, 4 only
+    scores[0, 1, 1, 0] = 5.0
+    anomaly_score = scores.flatten(1).max(dim=1).values
+
+    node.forward(scores=scores, targets=targets, anomaly_score=anomaly_score, context=_ctx())
+
+    _, pixel_target = pixel_calls[0]
+    assert not bool(pixel_target.any())  # the stride skipped the only positive pixel
+    _, image_target = image_calls[0]
+    assert image_target.dtype == torch.bool
+    assert bool(image_target[0])  # the image label still says "anomalous"
+
+
+def test_stride_one_is_bit_exact_against_the_unstrided_reference() -> None:
+    """pixel_stride=1 must be the identity: same confusion matrix, same AUROC."""
+    node = AnomalyAUROCMetrics(thresholds=200, pixel_stride=1)
+    b, h, w = 2, 8, 10
+    scores, targets, anomaly_score = _random_batch(b, h, w, seed=7)
+    node.forward(scores=scores, targets=targets, anomaly_score=anomaly_score, context=_ctx())
+
+    ref = BinaryAUROC(thresholds=200)
+    ref.update(
+        torch.sigmoid(scores.flatten().float()),
+        targets.squeeze(-1).flatten().long(),
+    )
+
+    assert torch.equal(node.pixel_auroc.confmat, ref.confmat)
+    assert float(node.pixel_auroc.compute()) == float(ref.compute())
+
+
+def test_bool_targets_match_long_targets() -> None:
+    """Feeding the mask as bool (no int64 promotion) gives the same state as long."""
+    b, h, w = 2, 8, 10
+    scores, targets, anomaly_score = _random_batch(b, h, w, seed=11)
+
+    bool_node = AnomalyAUROCMetrics(thresholds=200)
+    bool_node.forward(scores=scores, targets=targets, anomaly_score=anomaly_score, context=_ctx())
+    long_node = AnomalyAUROCMetrics(thresholds=200)
+    long_node.forward(
+        scores=scores,
+        targets=targets.long(),
+        anomaly_score=anomaly_score,
+        context=_ctx(),
+    )
+
+    assert torch.equal(bool_node.pixel_auroc.confmat, long_node.pixel_auroc.confmat)
+    assert torch.equal(bool_node.image_auroc.confmat, long_node.image_auroc.confmat)
+    assert float(bool_node.pixel_auroc.compute()) == float(long_node.pixel_auroc.compute())
+
+
+def test_binary_auroc_skips_argument_validation() -> None:
+    """validate_args=False drops torchmetrics' per-update unique()/sort over every pixel."""
+    node = AnomalyAUROCMetrics()
+    assert node.pixel_auroc.validate_args is False
+    assert node.image_auroc.validate_args is False
+
+
+@pytest.mark.parametrize("bad", [0, -1, 1.5, "2"])
+def test_invalid_pixel_stride_raises(bad: object) -> None:
+    with pytest.raises(ValueError, match="pixel_stride"):
+        AnomalyAUROCMetrics(pixel_stride=bad)
+
+
+@pytest.mark.parametrize("bad", [1, 0, -3, 2.5, "200"])
+def test_invalid_thresholds_raises(bad: object) -> None:
+    with pytest.raises(ValueError, match="thresholds"):
+        AnomalyAUROCMetrics(thresholds=bad)

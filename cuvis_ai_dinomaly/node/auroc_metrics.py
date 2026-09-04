@@ -21,6 +21,14 @@ Scores are passed through ``sigmoid`` before the binned metric so the thresholds
 ``[0, 1]``; AUROC is rank-invariant under a monotonic transform, so the value is
 unchanged.
 
+``pixel_stride`` trades a little pixel-AUROC resolution for the transient memory the
+per-step update costs: the score map and the mask are subsampled on H and W (``[:, ::s,
+::s]``) before they are flattened, so torchmetrics sees ``ceil(H / s) * ceil(W / s) * B``
+elements instead of the full frame. It defaults to 1 (no subsampling, byte-identical to
+before). The image-level pair is never subsampled - the per-image label is read off the
+full-resolution mask, so a single anomalous pixel the stride skips still marks the frame
+anomalous.
+
 UPSTREAM USAGE (deferred move): the long-term home is ``cuvis-ai``
 ``cuvis_ai/node/metrics.py``, next to ``AnomalyDetectionMetrics`` (whose streaming
 pattern this mirrors), so *any* pipeline — not just Dinomaly — can wire a streaming
@@ -40,6 +48,7 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 import torch
+from cuvis_ai_core.node.metric_utils import subsample_hw, warn_below_vectorized_cutoff
 from cuvis_ai_schemas.enums import NodeCategory, NodeTag
 from cuvis_ai_schemas.execution import Context, Metric
 from cuvis_ai_schemas.pipeline import PortSpec
@@ -64,6 +73,15 @@ class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
     metrics : ``list[Metric]`` — running ``auroc_pixel`` / ``auroc_image`` per batch (for
         live monitoring, e.g. the TensorBoard node). The authoritative epoch value is the
         pooled ``compute()`` the trainer logs from :meth:`pooled_metrics` at epoch end.
+
+    Parameters
+    ----------
+    thresholds : int
+        Histogram bins of the binned ``BinaryAUROC`` (>= 2). Per-epoch state is
+        O(thresholds) regardless of the frame size.
+    pixel_stride : int
+        Subsampling step applied to H and W of the *pixel-level* pair before flattening
+        (>= 1; 1 = no subsampling). The image-level pair is unaffected.
     """
 
     _category = NodeCategory.METRIC
@@ -100,13 +118,30 @@ class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
         ),
     }
 
-    def __init__(self, thresholds: int = 200, **kwargs: Any) -> None:
-        super().__init__(thresholds=thresholds, **kwargs)
+    def __init__(self, thresholds: int = 200, pixel_stride: int = 1, **kwargs: Any) -> None:
+        if isinstance(thresholds, bool) or not isinstance(thresholds, int) or thresholds < 2:
+            raise ValueError(
+                "AnomalyAUROCMetrics: thresholds must be an int >= 2 (histogram bins of the "
+                f"binned AUROC), got {thresholds!r}."
+            )
+        if isinstance(pixel_stride, bool) or not isinstance(pixel_stride, int) or pixel_stride < 1:
+            raise ValueError(
+                "AnomalyAUROCMetrics: pixel_stride must be an int >= 1 (1 = no subsampling), "
+                f"got {pixel_stride!r}."
+            )
+        # pixel_stride rides along with thresholds so it lands in hparams and survives a
+        # pipeline save/restore.
+        super().__init__(thresholds=thresholds, pixel_stride=pixel_stride, **kwargs)
+        self.pixel_stride = pixel_stride
+        # Warn-once bookkeeping for the subsampled-below-the-vectorized-cutoff case.
+        self._stride_warn_state: dict[str, Any] = {}
         # Histogram-based AUROC: O(thresholds) state, accumulated across batches and reset
         # only at the (stage, epoch) boundary. forward() emits the running value per batch;
         # the pooled epoch value is logged via pooled_metrics() (see POOLED_METRIC_NAMES).
-        self.pixel_auroc = BinaryAUROC(thresholds=thresholds)
-        self.image_auroc = BinaryAUROC(thresholds=thresholds)
+        # validate_args=False drops torchmetrics' per-update unique()/sort over every pixel;
+        # the ports already guarantee float scores and a bool mask.
+        self.pixel_auroc = BinaryAUROC(thresholds=thresholds, validate_args=False)
+        self.image_auroc = BinaryAUROC(thresholds=thresholds, validate_args=False)
 
     def _reset_state(self) -> None:
         self.pixel_auroc.reset()
@@ -122,11 +157,23 @@ class AnomalyAUROCMetrics(_StreamingBinnedAUROC):
         # Reset on the (stage, epoch) boundary so each epoch accumulates fresh.
         self._reset_on_epoch_boundary(context)
 
-        # Pixel-level: sigmoid -> [0, 1] for the binned metric (AUROC is rank-invariant).
-        self.pixel_auroc.update(self._binned_preds(scores), targets.squeeze(-1).flatten().long())
+        # Image-level label first, off the FULL-resolution mask: any positive pixel makes the
+        # frame anomalous, including one that pixel_stride skips.
+        img_tgts = targets.squeeze(-1).flatten(1).any(dim=1)
 
-        # Image-level: per-image score vs "any GT pixel positive" label.
-        img_tgts = targets.squeeze(-1).flatten(1).any(dim=1).long()
+        # Pixel-level: subsample H/W before the flatten and the sigmoid, so both the copy and
+        # torchmetrics' per-update confusion matrix scale with the stride. Targets stay bool
+        # (no int64 promotion); the binned update handles bool directly.
+        pixel_scores = subsample_hw(scores, self.pixel_stride)
+        pixel_targets = subsample_hw(targets, self.pixel_stride)
+        warn_below_vectorized_cutoff(
+            self.name, pixel_targets.numel(), targets.numel(), self._stride_warn_state
+        )
+        self.pixel_auroc.update(
+            self._binned_preds(pixel_scores), pixel_targets.squeeze(-1).flatten().bool()
+        )
+
+        # Image-level: per-image score vs "any GT pixel positive" label (never subsampled).
         self.image_auroc.update(self._binned_preds(anomaly_score), img_tgts)
 
         return {
