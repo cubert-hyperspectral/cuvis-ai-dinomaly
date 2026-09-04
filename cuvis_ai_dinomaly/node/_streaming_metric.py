@@ -25,11 +25,11 @@ class _StreamingMetric(Node):
     :meth:`_reset_on_epoch_boundary` so each epoch starts from cleared state.
     """
 
+    # Declared on the class (cuvis-ai-core 0.14.1): streaming metrics run in val/test only.
+    EXECUTION_STAGES = frozenset({ExecutionStage.VAL, ExecutionStage.TEST})
+
     def __init__(self, **kwargs: Any) -> None:
-        name, execution_stages = Node.consume_base_kwargs(
-            kwargs, {ExecutionStage.VAL, ExecutionStage.TEST}
-        )
-        super().__init__(name=name, execution_stages=execution_stages, **kwargs)
+        super().__init__(**kwargs)
         self._last_key: tuple[ExecutionStage, int] | None = None
 
     def _reset_state(self) -> None:

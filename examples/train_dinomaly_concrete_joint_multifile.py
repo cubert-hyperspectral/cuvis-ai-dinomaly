@@ -49,12 +49,12 @@ class TrainOnlyDistinctnessLoss(Node):
         "loss": PortSpec(dtype=torch.float32, shape=(), description="Distinctness loss")
     }
 
+    EXECUTION_STAGES = frozenset({ExecutionStage.TRAIN})
+
     def __init__(self, weight: float = 0.1, eps: float = 1e-6, **kwargs: Any) -> None:
         self.weight = float(weight)
         self.eps = float(eps)
-        super().__init__(
-            execution_stages={ExecutionStage.TRAIN}, weight=self.weight, eps=self.eps, **kwargs
-        )
+        super().__init__(weight=self.weight, eps=self.eps, **kwargs)
 
     def forward(self, selection_weights: Tensor, **_: Any) -> dict[str, Tensor]:
         w_norm = F.normalize(selection_weights, p=2, dim=-1, eps=self.eps)
