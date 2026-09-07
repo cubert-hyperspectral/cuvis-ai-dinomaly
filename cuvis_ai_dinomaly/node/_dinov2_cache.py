@@ -29,13 +29,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from cuvis_ai_dinomaly.weights import WEIGHTS
+
 # anomalib's hardcoded default; we replace only this sentinel, never an explicit arg.
 _DEFAULT_SENTINEL = "./pre_trained/"
 
-# anomalib weight filename -> cuvis-ai-core registry name, for the mirrored variants.
-MIRRORED_DINOV2_WEIGHTS: dict[str, str] = {
-    "dinov2_vitb14_reg4_pretrain.pth": "dinov2_vitb14_reg4",
-}
+# anomalib weight filename -> cuvis-ai-core registry name, for the mirrored variants
+# (derived from the plugin's weight declarations, so the two tables cannot drift).
+MIRRORED_DINOV2_WEIGHTS: dict[str, str] = {entry.filename: entry.name for entry in WEIGHTS}
 
 
 def _loader_cls() -> type | None:
