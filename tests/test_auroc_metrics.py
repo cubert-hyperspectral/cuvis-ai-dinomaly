@@ -17,6 +17,7 @@ pytest.importorskip("cuvis_ai.node.metrics", reason="cuvis-ai (examples extra) n
 def test_old_import_path_reexports_upstream_class() -> None:
     """The plugin path resolves to the exact upstream class object."""
     from cuvis_ai.node.metrics import AnomalyAUROCMetrics as Upstream
+
     from cuvis_ai_dinomaly.node.auroc_metrics import AnomalyAUROCMetrics as Shim
 
     assert Shim is Upstream

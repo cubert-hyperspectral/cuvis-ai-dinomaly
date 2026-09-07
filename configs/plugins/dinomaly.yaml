@@ -1,9 +1,12 @@
 # Local plugin manifest (path relative to this file). See cuvis-ai plugin-system docs.
+# AnomalyAUROCMetrics is no longer advertised here: it moved upstream to
+# cuvis_ai.node.metrics.AnomalyAUROCMetrics (ALL-5851). Pipelines saved against the old path
+# cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics still resolve via the re-export shim in
+# node/auroc_metrics.py (NodeRegistry.get imports a full class path directly).
 name: dinomaly
 path: "../.."
 capabilities:
   - class_name: cuvis_ai_dinomaly.node.dinomaly_detector.DinomalyDetector
   - class_name: cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge
-  - class_name: cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics
   - class_name: cuvis_ai_dinomaly.node.per_class_auroc.PerClassAnomalyAUROC
   - class_name: cuvis_ai_dinomaly.node.val_anomaly_mean.ValNormalAnomalyMean
