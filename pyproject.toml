@@ -72,8 +72,10 @@ dev = [
 ]
 # The example scripts (examples/) and tutorial notebooks import the high-level `cuvis-ai` node
 # library and the `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.9.0 dropped the cuvis SDK, so
-# the examples pull no SDK. cuvis-ai 0.12.0 is the current release of the node library the
-# tutorials wire (`AnomalyDataNode` with the `class_mask` port included). cuvis-ai-dataloader
+# the examples pull no SDK. cuvis-ai 0.16.0 is the release of the node library that ships
+# `AnomalyAUROCMetrics` upstream (moved out of this plugin, ALL-5851); the back-compat shim in
+# `node/auroc_metrics.py` re-exports it from there, and the tutorials wire it plus `AnomalyDataNode`
+# (with the `class_mask` port). cuvis-ai-dataloader
 # 0.5.0 carries `convert_universe`, the unified `universe.csv` vocabulary (`materialized_path`
 # column), and the `MultiNpzDataModule` (`npz_multi`) batch contract the tutorials read; base
 # install is SDK-free; the dataloader's `[cu3s]` (cuvis SDK reader) and `[coco]` (COCO
@@ -83,7 +85,7 @@ dev = [
 # imported directly by the tutorial notebooks and their utils, so they are declared here rather
 # than relied on as transitives.
 examples = [
-    "cuvis-ai>=0.12.0",
+    "cuvis-ai>=0.16.0",
     "cuvis-ai-dataloader[cu3s,coco]>=0.5.0",
     "pandas>=2.0.0",
     "matplotlib>=3.8.0",

@@ -1,9 +1,10 @@
 """Shared scaffolding for streaming, histogram-binned AUROC metric nodes (val/test only).
 
-Both :class:`~cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics` (pixel + image) and
-:class:`~cuvis_ai_dinomaly.node.per_class_auroc.PerClassAnomalyAUROC` *compose* torchmetrics
+:class:`~cuvis_ai_dinomaly.node.per_class_auroc.PerClassAnomalyAUROC` *composes* torchmetrics
 ``BinaryAUROC`` accumulators (histogram ``thresholds`` -> O(thresholds) state) rather than
-reimplementing AUROC. This base owns the binned-AUROC bits: the ``thresholds`` node param and
+reimplementing AUROC. (The pixel + image ``AnomalyAUROCMetrics`` node that also used this base
+moved upstream to ``cuvis_ai.node.metrics``; see :mod:`cuvis_ai_dinomaly.node.auroc_metrics`.)
+This base owns the binned-AUROC bits: the ``thresholds`` node param and
 the sigmoid+flatten transform that maps a raw anomaly map onto the binned metric's ``[0, 1]``
 threshold grid (AUROC is rank-invariant under the monotonic sigmoid, so the value is
 unchanged). The ``(stage, epoch)`` reset bookkeeping lives in

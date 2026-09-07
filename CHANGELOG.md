@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- **`AnomalyAUROCMetrics` moved upstream to `cuvis_ai.node.metrics.AnomalyAUROCMetrics`** (ALL-5851), so any pipeline can wire the streaming pixel/image AUROC without this plugin. `node/auroc_metrics.py` is now a back-compat shim that re-exports the upstream class under its historical import path (`cuvis_ai_dinomaly.node.auroc_metrics.AnomalyAUROCMetrics`), so pipeline YAMLs saved against the old path keep loading; the shim import is lazy (the plugin's `node/__init__.py` does not import it), so a plain plugin load still pulls only cuvis-ai-core + schemas. The node's behaviour tests now live upstream in cuvis-ai; the plugin keeps a single shim-identity test (skipped where cuvis-ai is not installed). The `examples` extra floor is raised to `cuvis-ai>=0.16.0` (the release that ships the node). `PerClassAnomalyAUROC` and the shared `_StreamingBinnedAUROC` base are unchanged.
+- **Blocked on the cuvis-ai release** that ships `AnomalyAUROCMetrics` upstream (the `>=0.16.0` floor); the shim import fails against an older cuvis-ai.
+
 ## 0.7.1 - 2026-09-07
 
 - **`AnomalyAUROCMetrics` computes the pixel metrics on a strided subsample of the frame (`pixel_stride`, default 1 = unchanged); the image metrics are unchanged.** The score map and the ground-truth mask are subsampled on H and W (`[:, ::s, ::s]`) before they are flattened and before the sigmoid, so a validation step feeds torchmetrics `ceil(H / s) * ceil(W / s) * B` elements instead of the full frame. The per-image label is still read off the full-resolution mask, so a single anomalous pixel the stride skips still marks the frame anomalous, and the per-image score is never subsampled. `pixel_stride` is an hparam, so it survives a pipeline save/restore; `thresholds` and `pixel_stride` are now validated in the constructor (`thresholds >= 2`, `pixel_stride >= 1`) instead of failing inside torchmetrics.
