@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0 - unreleased
+
+- `cuvis_ai_dinomaly/weights.py` declares the DINOv2 ViT-B/14 reg4 backbone (`cubert-gmbh/dinov2` pin, size, Apache-2.0) as `WEIGHTS`, registered with `ModelWeights.register` when the package is imported and projected by cuvis-ai's `emit_metadata` into the manifest's `weights:` block; the anomalib filename table the loader patch reads is derived from it. The Cubert-trained Dinomaly pipelines stay declared in cuvis-ai-core. Floors `cuvis-ai-core[hf]>=0.17.0` (upgrade the plugins together with core) and `cuvis-ai-schemas>=0.12.0`.
+
 ## 0.7.1 - 2026-09-07
 
 - **`AnomalyAUROCMetrics` computes the pixel metrics on a strided subsample of the frame (`pixel_stride`, default 1 = unchanged); the image metrics are unchanged.** The score map and the ground-truth mask are subsampled on H and W (`[:, ::s, ::s]`) before they are flattened and before the sigmoid, so a validation step feeds torchmetrics `ceil(H / s) * ceil(W / s) * B` elements instead of the full frame. The per-image label is still read off the full-resolution mask, so a single anomalous pixel the stride skips still marks the frame anomalous, and the per-image score is never subsampled. `pixel_stride` is an hparam, so it survives a pipeline save/restore; `thresholds` and `pixel_stride` are now validated in the constructor (`thresholds >= 2`, `pixel_stride >= 1`) instead of failing inside torchmetrics.
