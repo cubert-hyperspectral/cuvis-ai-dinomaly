@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Security: the pip-audit step now fails the build (it ran behind `|| true` with a note about anomalib and kornia advisories that no longer exist) and the locked environment is refreshed for the open advisories: aiohttp 3.14.3, anyio 4.14.2, cryptography 50.0.1, gitpython 3.1.62, hydra-core 1.3.7, lightning and pytorch-lightning 2.6.6, msgpack 1.2.2, pip 26.2.1, pygments 2.21.0, pytest 9.1.1, setuptools 84.0.0. Nothing is ignored.
+
 ## 0.8.0 - 2026-09-07
 
 - `cuvis_ai_dinomaly/weights.py` declares the DINOv2 ViT-B/14 reg4 backbone (`cubert-gmbh/dinov2` pin, size, Apache-2.0) as `WEIGHTS`, registered with `ModelWeights.register` when the package is imported and projected by cuvis-ai's `emit_metadata` into the manifest's `weights:` block; the anomalib filename table the loader patch reads is derived from it. The Cubert-trained Dinomaly pipelines stay declared in cuvis-ai-core. Floors `cuvis-ai-core[hf]>=0.17.1` (upgrade the plugins together with core; 0.17.1 makes `ModelWeights.materialize` follow the symlinked snapshot entries of a Linux Hugging Face cache, which the backbone routing relies on) and `cuvis-ai-schemas>=0.12.0`.
