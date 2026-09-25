@@ -121,9 +121,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Run pip-audit
-        # Non-blocking: anomalib==2.1.0 / kornia==0.6.12 may carry transient
-        # CVEs we cannot patch without breaking compatibility.
-        run: uv run --no-sources --locked --extra dev pip-audit --strict --desc on || true
+        run: uv run --no-sources --locked --extra dev pip-audit --desc on --skip-editable
 
       - name: Run detect-secrets
         run: uv run --no-sources --locked --extra dev detect-secrets scan --baseline .secrets.baseline
