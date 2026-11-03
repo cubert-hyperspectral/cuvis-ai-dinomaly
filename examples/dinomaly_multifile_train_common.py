@@ -20,7 +20,7 @@ from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.training.config import create_callbacks_from_config
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import (
     CallbacksConfig,
@@ -103,34 +103,22 @@ def run_dinomaly_multifile_training(
     output_dir = Path(cfg.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pick the datalake backend from `data.data_module` (both read the shared universe.csv):
-    # - npz_multi (default): `data.universe_csv` + `data.splits_json` (a core DataSplitConfig).
-    # - cu3s_multi: `data.universe_csv` (cu3s recordings; a module-owned `split` column, or pair
-    #   it with a `splits_json`). `universe_csv` is the one input key across both backends now.
-    common_loader_kwargs = {
-        "batch_size": cfg.data.batch_size,
-        "num_workers": int(cfg.data.get("num_workers", 0)),
-    }
-    backend = str(cfg.data.get("data_module", "npz_multi"))
-    if backend == "npz_multi":
-        datamodule = MultiNpzDataModule(
-            universe_csv=cfg.data.universe_csv,
-            splits=load_splits(cfg.data.splits_json),
-            **common_loader_kwargs,
-            pin_memory=bool(cfg.data.get("pin_memory", True)),
-            persistent_workers=bool(cfg.data.get("persistent_workers", True)),
-            worker_multiprocessing_context=str(
-                cfg.data.get("worker_multiprocessing_context", "spawn")
-            ),
-        )
-    elif backend == "cu3s_multi":
-        datamodule = MultiCu3sDataModule(
-            universe_csv=cfg.data.universe_csv,
-            **common_loader_kwargs,
-            processing_mode=cfg.data.processing_mode,
-        )
-    else:
-        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
+    # The cu3s recordings are read directly: `data.universe_csv` lists the frames and
+    # `data.splits_json` (a core DataSplitConfig) assigns them to train / val / test; without it
+    # the universe.csv needs a `split` column. `data.reader` holds the MultiCu3sDataModule reader
+    # options (max_open_sessions, read_ahead, cuda_cubes, sdk_cuda, read_threads).
+    backend = str(cfg.data.get("data_module", "cu3s_multi"))
+    if backend != "cu3s_multi":
+        raise ValueError(f"data.data_module must be 'cu3s_multi', got {backend!r}.")
+    splits_json = cfg.data.get("splits_json")
+    datamodule = MultiCu3sDataModule(
+        universe_csv=cfg.data.universe_csv,
+        splits=load_splits(splits_json) if splits_json else None,
+        batch_size=cfg.data.batch_size,
+        num_workers=int(cfg.data.get("num_workers", 0)),
+        processing_mode=cfg.data.processing_mode,
+        **(cfg.data.get("reader") or {}),
+    )
     datamodule.setup(stage="fit")
 
     dcfg = cfg.dinomaly

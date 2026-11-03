@@ -21,8 +21,8 @@ shown). Provisioning follows the standard Cuvis.AI install (canonical docs:
 
 - A CUDA GPU + recent driver.
 - The **Cuvis C SDK** installed, with the `CUVIS` env var pointing at its dir (the `cuvis` Python
-  bindings dynamically link `libcuvis`). The convert step reads cu3s, so this is required;
-  training/inference on the NPZ is pure Python and does not need it.
+  bindings dynamically link `libcuvis`). Training and inference read the cu3s recordings
+  directly, so this is required.
 - `uv`, `git`, an **HF token** (`huggingface-cli login`), and — only if you want the pipeline PNGs
   from the training scripts — `graphviz` (`sudo apt install graphviz`; otherwise the scripts just
   log a warning and skip the diagram).
@@ -32,39 +32,28 @@ shown). Provisioning follows the standard Cuvis.AI install (canonical docs:
 ```bash
 git clone <cuvis-ai-dinomaly>
 cd cuvis-ai-dinomaly
-uv sync --extra examples                                 # framework + torch (cu128) + anomalib + cuvis-ai
-uv pip install 'cuvis-ai-dataloader[cu3s,coco]>=0.5.0'   # cu3s reader + COCO labeler + cuvis bindings
-huggingface-cli login                                    # HF token for the dataset download
+uv sync --extra examples    # framework + torch + anomalib + cuvis-ai + the cu3s reader (cuvis bindings)
+huggingface-cli login       # HF token for the dataset download
 # point CUVIS at the SDK dir (the dir containing libcuvis):
 #   bash:        export CUVIS=/path/to/cuvis-sdk
 #   PowerShell:  $env:CUVIS = "C:\path\to\cuvis-sdk"   (or persist: setx CUVIS "C:\path\to\cuvis-sdk")
 ```
 
-**2. Download + convert from HF → per-frame NPZ**
+**2. Download from HF**
 
 The train-on-normals split is `splits/dinomaly.json` (a selector over the shipped `universe.csv`)
-on the HF dataset. Its train/val/test frames (636) convert to per-frame NPZ (grouped by cu3s; each
-session downloaded once). Simplest driver:
+on the HF dataset. Training reads its train/val/test frames (636) straight from the cu3s
+recordings, so the download is the only data step:
 
 ```python
 from cuvis_ai_core.data.public_datasets import PublicDatasets
-from cuvis_ai_dataloader.data.npz_converter import convert_universe
 
-data_dir = "<data_dir>"  # raw cu3s land here
-raw = f"{data_dir}/XMR_Industrial_Foreign_Object_Detection_Lentils"
+data_dir = "<data_dir>"  # the dataset lands in <data_dir>/XMR_Industrial_Foreign_Object_Detection_Lentils
 PublicDatasets.download_dataset("industrial_fod_lentils", download_path=data_dir, force=False)
-result = convert_universe(
-    f"{raw}/universe.csv", raw, "<npz_out_dir>",
-    splits_json=f"{raw}/splits/dinomaly.json",
-    out_universe_csv="<npz_out_dir>/universe.csv", out_splits_json="<npz_out_dir>/splits.json",
-)
-splits_json, universe_csv = result.splits_json, result.universe_csv
 ```
 
-`convert_universe` writes a **`universe.csv`** (`source, index, materialized_path`) + a baked
-**`splits.json`** (see *Data model* below), reused on rerun. Tip: convert one session per
-subprocess — the cuvis SDK aborts the *process* on session teardown *after* the files are written,
-so per-session isolation keeps a long convert resumable + lossless.
+The download holds the 15 recordings under `data/`, the **`universe.csv`** and
+**`splits/dinomaly.json`** (see *Data model* below); both are used as they are.
 
 **3a. Run the pedagogical notebooks (Jupyter)**
 
@@ -74,16 +63,20 @@ uv run --no-sync jupyter lab    # then open notebooks/lentils_anomaly/lentils_rg
 ```
 
 - **`--no-sync` matters:** a plain `uv run` re-syncs from the lock and would uninstall the
-  `[cu3s,coco]` extra and `jupyterlab` (neither is a package dependency). Running Jupyter from the
+  `examples` extra and `jupyterlab` (neither is a package dependency). Running Jupyter from the
   project venv this way also means the default kernel already sees `cuvis_ai*` (no `ipykernel`
   registration).
-- Every knob (`MAX_EPOCHS` / `IMAGE_SIZE` / `SMOKE_LIMIT`, and inference's `PIPELINE_DIR` /
-  `TEST_LIMIT`) is a plain variable at the top of each notebook's setup cell; edit it in place.
+- Every knob (`MAX_EPOCHS` / `IMAGE_SIZE` / `MAX_OPEN_SESSIONS` / `READ_AHEAD`, and inference's
+  `PIPELINE_DIR` / `TEST_LIMIT`) is a plain variable at the top of each notebook's setup cell;
+  edit it in place. The reader defaults (3 open recordings, 1 frame read ahead) fit an 8 GB GPU;
+  on a 24 GB GPU use 15 and 2.
 
 **3b. Or run the scripts (full-fidelity 20/50-epoch runs)**
 
 ```bash
-# 448px, 6 workers, AdamW, best-checkpoint. <UNIVERSE>/<SPLITS_JSON> = the universe.csv / splits.json from the convert above.
+# 448px, AdamW, best-checkpoint, cu3s reader defaults for a 24 GB GPU (configs/trainrun, data.reader).
+# <UNIVERSE> = <data_dir>/XMR_Industrial_Foreign_Object_Detection_Lentils/universe.csv,
+# <SPLITS_JSON> = the splits/dinomaly.json next to it.
 uv run python examples/train_dinomaly_rgb_multifile.py     data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/rgb     training.max_epochs=20
 uv run python examples/train_dinomaly_cir_multifile.py     data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/cir     training.max_epochs=20
 uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/adaclip training.max_epochs=20
@@ -100,10 +93,10 @@ See *Scripts* below for the full-fidelity knobs and the learnable-Concrete varia
 
 | package | version |
 |---|---|
-| cuvis-ai | ≥ 0.12.0 |
-| cuvis-ai-core | ≥ 0.12.1 |
-| cuvis-ai-schemas | ≥ 0.9.0 |
-| cuvis-ai-dataloader | ≥ 0.5.0 (the `universe_csv` split model; provides `MultiNpzDataModule` / `npz_multi`) |
+| cuvis-ai | ≥ 0.16.1 |
+| cuvis-ai-core | ≥ 0.17.1 |
+| cuvis-ai-schemas | ≥ 0.12.0 |
+| cuvis-ai-dataloader | ≥ 0.8.2 (`MultiCu3sDataModule` / `cu3s_multi` with a bounded set of open recordings and `read_ahead`) |
 | anomalib | 2.1.0 |
 
 A CUDA GPU is required (DINOv2 reg ViT-B/14 encoder, ~148 M params, ~592 MB pipeline).
@@ -128,24 +121,20 @@ two models stay directly comparable.
 
 ## Data model: `universe.csv` + `splits.json` (the selector split model)
 
-The provisioning downloads the cu3s dataset from HuggingFace (via `PublicDatasets`), converts the
-frames `splits/dinomaly.json` selects to per-frame NPZ with cuvis-ai-dataloader's `convert_universe`,
-and yields `(splits_json, universe_csv)`:
+The provisioning downloads the cu3s dataset from HuggingFace (via `PublicDatasets`); the two files
+the dataset ships next to its recordings drive cuvis-ai-dataloader's `MultiCu3sDataModule`
+(`cu3s_multi`) as they are:
 
-- **`universe.csv`** (`source, index, materialized_path`) is the sample universe: one row per frame,
-  `source` the posix cu3s path, `index` the measurement index (`local_image_id`, also the COCO
-  `image_id`), `materialized_path` the per-frame `.npz` relative to the CSV. Each NPZ carries `cube [H,W,61]`, `wavelengths [61]`, and
-  — for annotated frames — a baked binary `mask [H,W]` + category `class_mask [H,W]` (normal frames
-  have no mask key; the loader emits zeros).
-- **`splits.json`** is the baked assignment: a core `DataSplitConfig` of `file_indices` selectors
-  (one per source per split). It is identical to the dataset's shipped `splits/dinomaly.json`, so the
-  same file drives training here and in the CuvisNEXT split designer. `MultiNpzDataModule` resolves
-  it over the `universe.csv`.
-
-Verified end-to-end **on a fresh machine at 20 epochs** for all three variants (see *Validated
-results* below): normal frames → empty mask, annotated frames → baked class ids matching the GT
-`category_labels`; validated 180/180 byte-for-byte vs the GT COCO. The convert step needs the cu3s
-reader stack (`cuvis` SDK + the `[cu3s,coco]` extra); training/inference on the NPZ needs neither.
+- **`universe.csv`** (`source, index, annotation, group, tags`) is the sample universe: one row per
+  frame, `source` the posix cu3s path (`data/day2/<ts>.cu3s`), `index` the measurement index (also
+  the COCO `image_id`), `annotation` the recording's COCO file. The data module reads each frame's
+  cube `[H,W,61]` and `wavelengths [61]` from the recording and rasterizes its COCO polygons into
+  `mask [H,W]`, the per-pixel category ids (0 = background); `AnomalyDataNode` turns that into the
+  binary anomaly mask.
+- **`splits/dinomaly.json`** is the baked assignment: a core `DataSplitConfig` of `file_indices`
+  selectors (one per source per split), so the same file drives training here and in the CuvisNEXT
+  split designer. Its constraints (`no_split_overlap`, `no_train_anomalous`) are checked when the
+  data module resolves it.
 
 ## Notebooks (pedagogical)
 
@@ -168,17 +157,18 @@ notebook at it via its `PIPELINE_DIR` variable.
 ## Scripts (full-fidelity runs)
 
 The Hydra scripts in `examples/` are the canonical path for the definitive 50-epoch numbers
-(they add the LR scheduler + all knobs the notebooks omit for clarity). The NPZ backend takes a
-`data.universe_csv` + `data.splits_json` pair (a `convert_universe` output); the cu3s backend
-takes `data.universe_csv` with `data_module: cu3s_multi` instead.
+(they add the LR scheduler + all knobs the notebooks omit for clarity). They take
+`data.universe_csv` + `data.splits_json` (the two files above) and the cu3s reader options under
+`data.reader` (defaults for a 24 GB GPU; on 8 GB add `data.reader.max_open_sessions=3
+data.reader.read_ahead=1 data.reader.cuda_cubes=false`).
 
 ```bash
-# RGB (fixed wavelengths). <UNIVERSE>/<SPLITS_JSON> = a convert_universe pair; <OUT> = output dir.
+# RGB (fixed wavelengths). <UNIVERSE>/<SPLITS_JSON> = universe.csv / splits/dinomaly.json; <OUT> = output dir.
 uv run python examples/train_dinomaly_rgb_multifile.py \
   output_dir=<OUT>/dinomaly_rgb_50ep \
   training.max_epochs=50 \
   data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> \
-  data.num_workers=6 data.persistent_workers=true eval_mode=best
+  eval_mode=best
 
 # CIR (NIR / Red / Green) — same, via:
 uv run python examples/train_dinomaly_cir_multifile.py  <same overrides>
@@ -213,7 +203,11 @@ dinomaly-not-dinomaly2 note above.)
 
 ## What is verified
 
-- The full path — **HuggingFace → convert → train → inference** — runs end-to-end on a *fresh
-  machine* (fresh clone, freshly-provisioned SDK) for all three variants, with no code changes.
-- Baked masks match the GT `category_labels` across day2/day3/day4 sessions + a no-COCO control.
+- The full path, **HuggingFace, train, inference**, runs end-to-end on a *fresh machine* (fresh
+  clone, freshly-provisioned SDK) for all three variants, with no code changes.
+- The cu3s data module hands out the frames the earlier NPZ conversion held, when both come from
+  the same Cuvis SDK: on 192 frames converted with SDK 3.6.1 every cube is bit-identical and every
+  mask identical. NPZ converted with SDK 3.5.3 (August 2026) carry the same masks on all 636 frames
+  of the split, but cubes 0.3 to 0.4% lower on average than SDK 3.6.1 reads (median difference 7 to
+  11 counts on values around 3000 to 5000): the SDK's reflectance changed, not the loader.
 - All four notebooks run end-to-end; the scripts run the full 20-epoch training + eval.

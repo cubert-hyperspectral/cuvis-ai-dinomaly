@@ -71,20 +71,22 @@ dev = [
     "twine>=6.2.0",
 ]
 # The example scripts (examples/) and tutorial notebooks import the high-level `cuvis-ai` node
-# library and the `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.9.0 dropped the cuvis SDK, so
-# the examples pull no SDK. cuvis-ai 0.12.0 is the current release of the node library the
-# tutorials wire (`AnomalyDataNode` with the `class_mask` port included). cuvis-ai-dataloader
-# 0.5.0 carries `convert_universe`, the unified `universe.csv` vocabulary (`materialized_path`
-# column), and the `MultiNpzDataModule` (`npz_multi`) batch contract the tutorials read; base
-# install is SDK-free; the dataloader's `[cu3s]` (cuvis SDK reader) and `[coco]` (COCO
-# rasterization) extras are required here because the tutorials provision data inline via
-# `convert_split_manifest` / `convert_universe` (gRPC runs still provision the plugin via
-# configs/plugins/cuvis_ai_dataloader.yaml instead). pandas / matplotlib / huggingface-hub are
-# imported directly by the tutorial notebooks and their utils, so they are declared here rather
-# than relied on as transitives.
+# library and the `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.16.1 is the oldest release of
+# the node library that runs on cuvis-ai-core 0.17.1 (0.15.0 removed `Node.consume_base_kwargs`,
+# which cuvis-ai 0.12.0 still called). The examples and notebooks read the lentils cu3s
+# recordings directly with `MultiCu3sDataModule` (`cu3s_multi`): cuvis-ai-dataloader 0.8.2 is the
+# first release whose `cu3s_multi` keeps a bounded set of recordings open (`max_open_sessions`)
+# and reads ahead of the model step (`read_ahead`, `cuda_cubes`); its `[cu3s]` (cuvis SDK
+# bindings) and `[coco]` (COCO rasterization) extras are required (gRPC runs still provision the
+# plugin via configs/plugins/cuvis_ai_dataloader.yaml instead). cuvis-ai-core 0.18.4 is the first
+# release whose `PublicDatasets` fetches the lentils revision with `constraints` splits (the July
+# revision's `leakage_check` splits no longer load with cuvis-ai-schemas 0.12 and later).
+# pandas / matplotlib / huggingface-hub are imported directly by the tutorial notebooks and their
+# utils, so they are declared here rather than relied on as transitives.
 examples = [
-    "cuvis-ai>=0.12.0",
-    "cuvis-ai-dataloader[cu3s,coco]>=0.5.0",
+    "cuvis-ai>=0.16.1",
+    "cuvis-ai-core[hf]>=0.18.4",
+    "cuvis-ai-dataloader[cu3s,coco]>=0.8.2",
     "pandas>=2.0.0",
     "matplotlib>=3.8.0",
     "huggingface-hub>=0.23.0",

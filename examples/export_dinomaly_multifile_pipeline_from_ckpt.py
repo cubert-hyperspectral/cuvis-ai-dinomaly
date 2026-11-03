@@ -8,12 +8,12 @@ Training writes checkpoints under ``<output_dir>/checkpoints/`` with ``save_last
 Use this to produce ``dinomaly_multifile_{cir|rgb}.{yaml,pt}`` in the same format as
 ``pipeline.save_to_file`` after training, without re-running fit.
 
-Example (CIR, NPZ splits, last checkpoint)::
+Example (CIR, last checkpoint)::
 
     cd /home/dev/anish/cuvis-ai-dinomaly
     uv run python examples/export_dinomaly_multifile_pipeline_from_ckpt.py \\
-        --ckpt /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/checkpoints/last.ckpt \\
-        --output-dir /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models_from_last \\
+        --ckpt /mnt/data/cuvis_ai_outputs/dinomaly_cir_50ep/checkpoints/last.ckpt \\
+        --output-dir /mnt/data/cuvis_ai_outputs/dinomaly_cir_50ep/trained_models_from_last \\
         --config configs/trainrun/dinomaly_multifile_cir.yaml \\
         --band cir
 """
@@ -35,7 +35,7 @@ from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PipelineMetadata
@@ -66,34 +66,20 @@ def build_pipeline_and_datamodule(
         "cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge",
     )
 
-    # Export runs a fresh StatisticalTrainer pass; NPZ dataset + spawn workers often
-    # hit PicklingError (same as full training). Use a single-threaded loader here.
-    # Backend from data.data_module (both read the shared universe.csv):
-    # npz_multi (default) = data.universe_csv + data.splits_json; cu3s_multi = data.universe_csv.
-    common_loader_kwargs = {
-        "batch_size": int(cfg.data.batch_size),
-        "num_workers": 0,
-    }
-    backend = str(cfg.data.get("data_module", "npz_multi"))
-    if backend == "npz_multi":
-        datamodule = MultiNpzDataModule(
-            universe_csv=str(cfg.data.universe_csv),
-            splits=load_splits(cfg.data.splits_json),
-            **common_loader_kwargs,
-            pin_memory=bool(cfg.data.get("pin_memory", True)),
-            persistent_workers=False,
-            worker_multiprocessing_context=str(
-                cfg.data.get("worker_multiprocessing_context", "spawn")
-            ),
-        )
-    elif backend == "cu3s_multi":
-        datamodule = MultiCu3sDataModule(
-            universe_csv=str(cfg.data.universe_csv),
-            **common_loader_kwargs,
-            processing_mode=str(cfg.data.processing_mode),
-        )
-    else:
-        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
+    # Export runs a fresh StatisticalTrainer pass over the cu3s recordings, read in this process
+    # (num_workers 0) with the trainrun's reader options (data.reader).
+    backend = str(cfg.data.get("data_module", "cu3s_multi"))
+    if backend != "cu3s_multi":
+        raise ValueError(f"data.data_module must be 'cu3s_multi', got {backend!r}.")
+    splits_json = cfg.data.get("splits_json")
+    datamodule = MultiCu3sDataModule(
+        universe_csv=str(cfg.data.universe_csv),
+        splits=load_splits(splits_json) if splits_json else None,
+        batch_size=int(cfg.data.batch_size),
+        num_workers=0,
+        processing_mode=str(cfg.data.processing_mode),
+        **(cfg.data.get("reader") or {}),
+    )
     datamodule.setup(stage="fit")
 
     dcfg = cfg.dinomaly

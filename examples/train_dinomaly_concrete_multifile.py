@@ -5,14 +5,14 @@ This mirrors the RGB/CIR scripts but replaces fixed/CIR wavelength selection wit
 
 Usage (from cuvis-ai-dinomaly repo root):
     uv run python examples/train_dinomaly_concrete_multifile.py
-    uv run python examples/train_dinomaly_concrete_multifile.py data.universe_csv=universe.csv data.splits_json=splits.json
-
-Full 50-epoch NPZ run (best-ckpt val/test + export), mirroring CIR workflow:
     uv run python examples/train_dinomaly_concrete_multifile.py \
-      output_dir=/mnt/data/cuvis_ai_outputs/dinomaly_concrete_npz_50ep_w0 \
+      data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json
+
+Full 50-epoch run (best-ckpt val/test + export), mirroring CIR workflow:
+    uv run python examples/train_dinomaly_concrete_multifile.py \
+      output_dir=/mnt/data/cuvis_ai_outputs/dinomaly_concrete_50ep \
       training.max_epochs=50 \
-      data.universe_csv=<out>/universe.csv data.splits_json=<out>/splits.json \
-      data.num_workers=0 data.persistent_workers=false \
+      data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json \
       eval_mode=best
 """
 

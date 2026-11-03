@@ -5,16 +5,21 @@ Wires :class:`DinomalyTrainLossBridge` in the pipeline graph and passes it to
 
 Usage (from cuvis-ai-dinomaly repo root):
     uv run python examples/train_dinomaly_rgb_multifile.py
-    uv run python examples/train_dinomaly_rgb_multifile.py data.universe_csv=universe.csv data.splits_json=splits.json
+    uv run python examples/train_dinomaly_rgb_multifile.py \
+      data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json
     uv run python examples/train_dinomaly_rgb_multifile.py dinomaly.use_center_crop=false
 
-Full 50-epoch NPZ run (best-ckpt val/test + export), mirroring CIR workflow:
+<lentils> is the HF lentils download (the cu3s recordings plus universe.csv and splits/).
+
+Full 50-epoch run (best-ckpt val/test + export), mirroring CIR workflow:
     uv run python examples/train_dinomaly_rgb_multifile.py \
-      output_dir=/mnt/data/cuvis_ai_outputs/dinomaly_rgb_npz_50ep_w0 \
+      output_dir=/mnt/data/cuvis_ai_outputs/dinomaly_rgb_50ep \
       training.max_epochs=50 \
-      data.universe_csv=<out>/universe.csv data.splits_json=<out>/splits.json \
-      data.num_workers=0 data.persistent_workers=false \
+      data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json \
       eval_mode=best
+
+On an 8 GB GPU add data.reader.max_open_sessions=3 data.reader.read_ahead=1
+data.reader.cuda_cubes=false.
 """
 
 from __future__ import annotations

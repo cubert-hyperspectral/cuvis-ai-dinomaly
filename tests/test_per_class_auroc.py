@@ -6,6 +6,7 @@ import pytest
 import torch
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
+from cuvis_ai_schemas.pipeline import PortSpec
 from torchmetrics.classification import BinaryAUROC
 
 from cuvis_ai_dinomaly.node.per_class_auroc import PerClassAnomalyAUROC
@@ -101,3 +102,34 @@ def test_resets_on_stage_epoch_boundary() -> None:
     assert {m.name: m.value for m in out1["metrics"]}["auroc_pixel_a"] == pytest.approx(
         0.0, abs=1e-6
     )
+
+
+def test_category_mask_matches_class_mask() -> None:
+    """The cu3s shape of the class ids ([B, H, W] in the batch mask) gives the same AUROC."""
+    torch.manual_seed(0)
+    scores = torch.randn(2, 16, 16, 1)
+    category_mask = torch.randint(0, 3, (2, 16, 16), dtype=torch.int32)
+    from_class_mask = PerClassAnomalyAUROC(class_names=CLASS_NAMES)
+    from_class_mask.forward(scores=scores, class_mask=category_mask.unsqueeze(-1), context=_ctx())
+    from_category_mask = PerClassAnomalyAUROC(class_names=CLASS_NAMES)
+    from_category_mask.forward(scores=scores, category_mask=category_mask, context=_ctx())
+    assert from_category_mask.compute() == from_class_mask.compute()
+
+
+def test_without_class_ids_raises() -> None:
+    """Neither class_mask nor category_mask connected is a wiring error, not an empty result."""
+    node = PerClassAnomalyAUROC(class_names=CLASS_NAMES)
+    with pytest.raises(ValueError, match="category_mask"):
+        node.forward(scores=torch.zeros(1, 2, 2, 1), context=_ctx())
+
+
+def test_category_mask_port_accepts_cu3s_data_node_mask() -> None:
+    """The mask output of cuvis-ai's CU3SDataNode ([B, H, W] int32) binds to category_mask;
+    class_mask keeps its [B, H, W, 1] contract, and both ports are optional."""
+    cu3s_data_node_mask = PortSpec(dtype=torch.int32, shape=(-1, -1, -1), description="mask")
+    specs = PerClassAnomalyAUROC.INPUT_SPECS
+    ok, message = cu3s_data_node_mask.is_compatible_with(specs["category_mask"], None, None)
+    assert ok, message
+    ok, _ = cu3s_data_node_mask.is_compatible_with(specs["class_mask"], None, None)
+    assert not ok
+    assert specs["class_mask"].optional and specs["category_mask"].optional

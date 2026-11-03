@@ -1,14 +1,16 @@
 # cuvis-ai-dataloader plugin manifest (data modules: cu3s / cu3s_multi / npz_multi / tiff_paired).
-# The example scripts select cu3s data; provisioning this manifest installs the package
-# (with its `[cu3s, coco]` extras, which pull the cuvis SDK) into the run env, so
-# cuvis-ai-dataloader is NOT a dependency of this plugin's pyproject. Provision it before
-# running a cu3s example (e.g. core's `provision` CLI, or `--plugins-dir configs/plugins`).
+# The example scripts and notebooks read the lentils cu3s recordings with `cu3s_multi`;
+# provisioning this manifest installs the package (with its `[cu3s, coco]` extras, which pull
+# the cuvis SDK bindings) into the run env, so cuvis-ai-dataloader is NOT a dependency of this
+# plugin's pyproject. Provision it before running an example (e.g. core's `provision` CLI, or
+# `--plugins-dir configs/plugins`). v0.8.2 is the first release whose `cu3s_multi` bounds its
+# open recordings (`max_open_sessions`) and reads ahead of the model step (`read_ahead`).
 #
 # Dev: uncomment the local path source to run against a sibling checkout instead of the tag.
 name: cuvis_ai_dataloader
 # path: "../../../cuvis-ai-dataloader/cuvis-ai-dataloader"
 repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dataloader.git"
-tag: "v0.5.0"
+tag: "v0.8.2"
 package_name: cuvis-ai-dataloader
 capabilities:
   - { class_name: cuvis_ai_dataloader.data.datamodule_cu3s.Cu3sDataModule,              kind: data_module, data_module_name: cu3s,        extras: [cu3s, coco] }
