@@ -196,6 +196,19 @@ uv run python examples/train_dinomaly_concrete_joint_multifile.py <same override
 | CIR | 0.994 | 0.893 |
 | AdaCLIP-bands | 0.994 | 0.929 |
 
+These numbers come from the July 2026 run, which trained from NPZ conversions. The Hydra scripts
+reading the cu3s recordings (`cu3s_multi`, 6 open recordings, Cuvis SDK 3.6.1, cuvis-ai 0.20.1,
+cuvis-ai-core 0.19.1), November 2026:
+
+| variant | pixel AUROC | image AUROC |
+|---|---|---|
+| RGB | 0.939 | 0.737 |
+| CIR | 0.988 | 0.854 (second seed: 0.862) |
+| AdaCLIP-bands | 0.992 | 0.947 |
+
+Each November model scores the same on the NPZ frames (pixel AUROC within 0.001, image AUROC
+within 0.015). CIR's image AUROC stays 0.03 to 0.04 below the July run on two seeds.
+
 Per-class pixel AUROC is 0.90–1.00 across the categories (`blue_paper` ≈ 1.0 for all variants). CIR
 and AdaCLIP-bands clearly beat plain RGB; AdaCLIP-bands has the best image-level AUROC. These are
 20-epoch numbers — a full 50-epoch run would likely improve them. (RGB pixel 0.944 already
