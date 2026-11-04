@@ -43,7 +43,9 @@ dependencies = [
     # only, matching cuvis-ai-deepeiou / cuvis-ai-sam3.
     # core 0.12.x carries the `Predictor.predict(stage=..., collect_ports=...)` APIs the
     # inference tutorials use; schemas 0.9.0 is the matching contracts release.
-    "cuvis-ai-core[hf]>=0.17.1",
+    # core 0.19.2 carries `Node.export_module()` and the `port_dtype` sidecar the
+    # ONNX exporter needs.
+    "cuvis-ai-core[hf]>=0.19.2",
     "cuvis-ai-schemas>=0.12.0",
     "anomalib==2.1.0",
     "kornia==0.6.12",
@@ -69,6 +71,10 @@ dev = [
     "detect-secrets>=1.4.0",
     "bandit[toml]>=1.7.5",
     "twine>=6.2.0",
+    # ONNX export tests need onnxscript (the dynamo exporter) and the CPU
+    # onnxruntime wheel for parity checks; pulled in via core's own extra so
+    # the floor stays with the exporter contract it tests against.
+    "cuvis-ai-core[onnx]>=0.19.2",
 ]
 # The example scripts (examples/) and tutorial notebooks import the high-level `cuvis-ai` node
 # library and the `cuvis-ai-dataloader` plugin directly. cuvis-ai 0.9.0 dropped the cuvis SDK, so

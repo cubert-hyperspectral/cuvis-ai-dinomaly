@@ -13,8 +13,10 @@ from cuvis_ai_schemas.enums import ExecutionStage, NodeCategory, NodeTag
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PortSpec
 from loguru import logger
-from torch import Tensor
+from torch import Tensor, nn
 from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize
+
+from cuvis_ai_dinomaly.node._antialias_resize_matrix import AntialiasResizeMatrix
 
 
 class _AreaAlignF:
@@ -81,6 +83,70 @@ def _area_anomaly_map_upsample(enabled: bool) -> Iterator[None]:
         _tm.F = real_f
 
 
+class _DetectorExportAdapter(nn.Module):
+    """``DinomalyDetector`` at inference as tensor ops, for :meth:`Node.export_module`.
+
+    Reproduces ``DinomalyDetector.forward`` at ``ExecutionStage.INFERENCE`` exactly,
+    with every branch the dynamo exporter cannot trace rewritten as graph ops:
+
+    - the ``float(x.max())`` input-scaling heuristic becomes a ``torch.where`` chain
+      on the tensor max instead of a Python branch on a Python float;
+    - the preprocessing ``Resize`` (antialiased bilinear, a fixed ``Resize`` ONNX op
+      TensorRT refuses) becomes :class:`AntialiasResizeMatrix`, two buffers applied
+      with ``einsum``, built eagerly from the node's own resize on the first call;
+    - ``torch.compile`` is never applied (the adapter always runs the eager model).
+
+    The resize matrices are not known until the first real input is seen, so the
+    adapter must run one eager forward (outside tracing) before it is exported;
+    :meth:`DinomalyDetector.export_module` does not do this call itself because the
+    exporter's own eager parity check (``PipelineSpanModule`` run with
+    ``use_adapters=True``) already provides it before tracing starts.
+    """
+
+    def __init__(self, node: DinomalyDetector) -> None:
+        super().__init__()
+        self.model = node.dinomaly_model
+        self.use_center_crop = node.use_center_crop
+        if node.use_center_crop:
+            self.crop = CenterCrop(node.crop_size)
+        self.resize = AntialiasResizeMatrix(node.image_size)
+        self.register_buffer(
+            "mean", torch.tensor(node.IMAGENET_MEAN, dtype=torch.float32).reshape(1, -1, 1, 1)
+        )
+        self.register_buffer(
+            "std", torch.tensor(node.IMAGENET_STD, dtype=torch.float32).reshape(1, -1, 1, 1)
+        )
+
+    def forward(self, rgb_image: Tensor) -> dict[str, Tensor]:
+        """``rgb_image`` is ``[B, H, W, C]``; returns ``scores`` and ``anomaly_score``."""
+        x = rgb_image.float()
+        max_val = x.max()
+        scale = torch.where(
+            max_val > 255.0,
+            max_val,
+            torch.where(max_val > 1.0, torch.full_like(max_val, 255.0), torch.ones_like(max_val)),
+        )
+        x = (x / scale).clamp(0.0, 1.0)
+        x = x.permute(0, 3, 1, 2)
+        x = self.resize(x)
+        if self.use_center_crop:
+            x = self.crop(x)
+        x = (x - self.mean) / self.std
+
+        with _area_anomaly_map_upsample(True):
+            pred = self.model(x)
+
+        amap = pred.anomaly_map
+        if amap.dim() == 3:
+            amap = amap.unsqueeze(1)
+        h, w = rgb_image.shape[1], rgb_image.shape[2]
+        scores = F.interpolate(amap, size=(h, w), mode="bilinear", align_corners=False)
+        return {
+            "scores": scores.permute(0, 2, 3, 1).float(),
+            "anomaly_score": pred.pred_score.float(),
+        }
+
+
 class DinomalyDetector(Node):
     """Pixel-level anomaly detection using Anomalib's ``DinomalyModel``.
 
@@ -125,6 +191,7 @@ class DinomalyDetector(Node):
             NodeTag.RECONSTRUCTION,
             NodeTag.LEARNABLE,
             NodeTag.TORCH,
+            NodeTag.ONNX,
         }
     )
 
@@ -457,6 +524,18 @@ class DinomalyDetector(Node):
         self._frozen = True
         for p in self.dinomaly_model.parameters():
             p.requires_grad_(False)
+
+    def export_module(self) -> nn.Module:
+        """The ONNX span exporter's stand-in for :meth:`forward` at inference.
+
+        Returns a :class:`_DetectorExportAdapter` built from this (already copied,
+        eval-mode) node: same input scaling and preprocessing, no ``.item()``, no
+        numpy, no Python branch on a tensor value, and the antialiased resize
+        replaced by an equivalent matrix operator a TensorRT graph accepts (see
+        :class:`AntialiasResizeMatrix`). Training-only state (``torch.compile``,
+        the training-loss path) is not part of this adapter: it is inference-only.
+        """
+        return _DetectorExportAdapter(self)
 
     def _rgb_bhwc_to_model_input(self, rgb_image: Tensor) -> Tensor:
         x = rgb_image
