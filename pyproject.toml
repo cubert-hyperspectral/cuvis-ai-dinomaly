@@ -81,7 +81,7 @@ dev = [
 # plugin via configs/plugins/cuvis_ai_dataloader.yaml instead). cuvis-ai-core 0.19.3 is the first
 # release whose post-fit steps (decider calibration, test) reuse the readers the fit already holds:
 # before it they reopened every val recording next to the open ones, which with the Cuvis SDK on the
-# GPU ran an 8 GB card out of memory (ALL-6934). 0.18.4 already fetched the lentils revision with
+# GPU ran an 8 GB card out of memory. 0.18.4 already fetched the lentils revision with
 # `constraints` splits (the July revision's `leakage_check` splits no longer load with
 # cuvis-ai-schemas 0.12 and later).
 # pandas / matplotlib / huggingface-hub are imported directly by the tutorial notebooks and their
