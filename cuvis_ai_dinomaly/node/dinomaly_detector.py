@@ -17,6 +17,7 @@ from torch import Tensor, nn
 from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize
 
 from cuvis_ai_dinomaly.node._antialias_resize_matrix import AntialiasResizeMatrix
+from cuvis_ai_dinomaly.node._bounded_topk_mean import bounded_topk_mean
 
 
 class _AreaAlignF:
@@ -101,6 +102,20 @@ class _DetectorExportAdapter(nn.Module):
     :meth:`DinomalyDetector.export_module` does not do this call itself because the
     exporter's own eager parity check (``PipelineSpanModule`` run with
     ``use_adapters=True``) already provides it before tracing starts.
+
+    The image score is not read off ``model(x).pred_score``: anomalib's
+    ``DinomalyModel.forward`` computes it with
+    ``torch.sort(flat, descending=True)[0][:, :k].mean(dim=1)`` on the anomaly map
+    resized to a fixed 256x256 (``anomalib.models.image.dinomaly.torch_model.
+    DEFAULT_RESIZE_SIZE``) and Gaussian-blurred, with ``k = int(N * 0.01)``
+    (``DEFAULT_MAX_RATIO``); a full descending sort lowers to an ONNX ``TopK``
+    node whose ``K`` is the full element count, which TensorRT's ``ITopKLayer``
+    refuses above 3840. The adapter calls the model's own
+    ``get_encoder_decoder_outputs`` and ``calculate_anomaly_maps`` (the two
+    pieces before the score, unchanged) and its ``gaussian_blur`` module, then
+    gets the same number as the sorted-and-sliced mean from
+    :func:`bounded_topk_mean`, which never asks any one ``torch.topk`` for more
+    than :data:`cuvis_ai_dinomaly.node._bounded_topk_mean.MAX_TOPK` values.
     """
 
     def __init__(self, node: DinomalyDetector) -> None:
@@ -116,6 +131,30 @@ class _DetectorExportAdapter(nn.Module):
         self.register_buffer(
             "std", torch.tensor(node.IMAGENET_STD, dtype=torch.float32).reshape(1, -1, 1, 1)
         )
+
+        from anomalib.models.image.dinomaly.torch_model import (
+            DEFAULT_MAX_RATIO,
+            DEFAULT_RESIZE_SIZE,
+        )
+
+        self._score_resize_size = DEFAULT_RESIZE_SIZE
+        self._score_k = int(DEFAULT_RESIZE_SIZE * DEFAULT_RESIZE_SIZE * DEFAULT_MAX_RATIO)
+
+    def _image_score(self, amap_model_res: Tensor) -> Tensor:
+        """Anomalib's image score, computed with a bounded top-k in place of sort.
+
+        ``amap_model_res`` is the anomaly map at the model's own resolution (the
+        ``out_size`` ``get_encoder_decoder_outputs``/``calculate_anomaly_maps``
+        produce, before any resize toward the input frame). Mirrors
+        ``DinomalyModel.forward``'s inference branch exactly: resize to a fixed
+        256x256, Gaussian blur, mean of the top one percent values.
+        """
+        resized = F.interpolate(
+            amap_model_res, size=self._score_resize_size, mode="bilinear", align_corners=False
+        )
+        blurred = self.model.gaussian_blur(resized)
+        flat = blurred.flatten(1)
+        return bounded_topk_mean(flat, self._score_k)
 
     def forward(self, rgb_image: Tensor) -> dict[str, Tensor]:
         """``rgb_image`` is ``[B, H, W, C]``; returns ``scores`` and ``anomaly_score``."""
@@ -134,16 +173,16 @@ class _DetectorExportAdapter(nn.Module):
         x = (x - self.mean) / self.std
 
         with _area_anomaly_map_upsample(True):
-            pred = self.model(x)
+            en, de = self.model.get_encoder_decoder_outputs(x)
+            amap_model_res, _ = self.model.calculate_anomaly_maps(en, de, out_size=x.shape[-2:])
 
-        amap = pred.anomaly_map
-        if amap.dim() == 3:
-            amap = amap.unsqueeze(1)
+        anomaly_score = self._image_score(amap_model_res)
+
         h, w = rgb_image.shape[1], rgb_image.shape[2]
-        scores = F.interpolate(amap, size=(h, w), mode="bilinear", align_corners=False)
+        scores = F.interpolate(amap_model_res, size=(h, w), mode="bilinear", align_corners=False)
         return {
             "scores": scores.permute(0, 2, 3, 1).float(),
-            "anomaly_score": pred.pred_score.float(),
+            "anomaly_score": anomaly_score.float(),
         }
 
 

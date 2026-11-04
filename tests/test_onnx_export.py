@@ -44,27 +44,64 @@ class _FakeEncoder(nn.Module):
 
 
 class _FakeDinomalyModel(nn.Module):
-    """Deterministic stand-in: a linear map keyed off the mean input value, so
-    the eager node, the export adapter and ONNX Runtime all compute the exact
-    same numbers from the exact same tensor ops (no real DINOv2 weights needed)."""
+    """Deterministic stand-in with the real model's score-path shape: a patch-level
+    anomaly map keyed off the mean input value plus a ramp (many distinct, strictly
+    ordered values, so a top-k check is not degenerate), ``get_encoder_decoder_outputs``
+    / ``calculate_anomaly_maps`` / ``gaussian_blur`` exposed the way
+    ``_DetectorExportAdapter`` calls them, and a ``forward`` that reproduces anomalib's
+    own inference branch (resize to 256, blur, sorted-mean score) from those same
+    primitives, so the eager node, the export adapter and ONNX Runtime must all compute
+    the exact same numbers (no real DINOv2 weights needed)."""
 
     def __init__(self, **_: object) -> None:
         super().__init__()
         self.encoder = _FakeEncoder()
         self.bottleneck = nn.Linear(1, 1, bias=False)
         self.decoder = nn.Linear(1, 1, bias=False)
+        self.gaussian_blur = nn.Identity()
+
+    def get_encoder_decoder_outputs(
+        self, x: torch.Tensor
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+        h, w = x.shape[2], x.shape[3]
+        hp, wp = h // 14, w // 14
+        base = x.mean(dim=(1, 2, 3))  # [B]
+        feat = base.reshape(x.shape[0], 1, 1).expand(x.shape[0], hp, wp)
+        return [feat], [feat]
+
+    @staticmethod
+    def calculate_anomaly_maps(
+        source_feature_maps: list[torch.Tensor],
+        target_feature_maps: list[torch.Tensor],
+        out_size: int | tuple[int, int] = 392,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        if not isinstance(out_size, tuple):
+            out_size = (int(out_size), int(out_size))
+        feat = source_feature_maps[0]
+        hp, wp = feat.shape[-2], feat.shape[-1]
+        ramp = torch.linspace(0.0, 1.0, hp * wp, device=feat.device, dtype=feat.dtype).reshape(
+            hp, wp
+        )
+        amap = (feat + ramp.unsqueeze(0)).unsqueeze(1)  # [B, 1, hp, wp]
+        amap = torch.nn.functional.interpolate(
+            amap, size=out_size, mode="bilinear", align_corners=True
+        )
+        return amap, [amap]
 
     def forward(
         self, x: torch.Tensor, global_step: int | None = None
     ) -> torch.Tensor | SimpleNamespace:
         if global_step is not None:
             return x.mean().reshape(())
-        h, w = x.shape[2], x.shape[3]
-        hp, wp = h // 14, w // 14
-        base = x.mean(dim=(1, 2, 3))  # [B]
-        ramp = torch.linspace(0.0, 1.0, hp * wp, device=x.device, dtype=x.dtype).reshape(hp, wp)
-        amap = base.reshape(x.shape[0], 1, 1) + ramp.unsqueeze(0)
-        score = base
+        en, de = self.get_encoder_decoder_outputs(x)
+        amap, _ = self.calculate_anomaly_maps(en, de, out_size=x.shape[-2:])
+        resized = torch.nn.functional.interpolate(
+            amap, size=256, mode="bilinear", align_corners=False
+        )
+        blurred = self.gaussian_blur(resized)
+        flat = blurred.flatten(1)
+        k = int(flat.shape[1] * 0.01)
+        score = torch.sort(flat, dim=1, descending=True)[0][:, :k].mean(dim=1)
         return SimpleNamespace(anomaly_map=amap, pred_score=score)
 
 
@@ -225,6 +262,58 @@ def test_export_module_exports_and_matches_onnxruntime(tmp_path) -> None:
         for attr in node.attribute:
             if attr.name == "antialias":
                 assert attr.i == 0, "the exported graph must not antialias its Resize node"
+
+
+def _topk_initializer_values(model: onnx.ModelProto) -> list[int]:
+    """The ``K`` value of every ``TopK`` node in ``model``, read off its initializer."""
+    by_name = {init.name: init for init in model.graph.initializer}
+    values: list[int] = []
+    for node in model.graph.node:
+        if node.op_type != "TopK":
+            continue
+        k_input = node.input[1]
+        init = by_name.get(k_input)
+        assert init is not None, f"TopK node {node.name!r} has no initializer for K"
+        arr = onnx.numpy_helper.to_array(init)
+        values.append(int(arr.reshape(-1)[0]))
+    return values
+
+
+def test_exported_graph_has_no_topk_node_above_the_tensorrt_cap(tmp_path) -> None:
+    """Regression test for the TensorRT ITopKLayer K=3840 cap: every TopK node the
+    exported graph carries (the image-score top-k, in however many rounds it took)
+    must ask for at most 3840 values, never the full sort anomalib's own code would
+    lower to."""
+    from cuvis_ai_dinomaly.node._bounded_topk_mean import MAX_TOPK
+
+    torch.manual_seed(5)
+    det = _make_detector(image_size=56, crop_size=56, use_center_crop=False)
+    det.eval()
+    x = torch.rand(1, 56, 56, 3)
+
+    adapter = det.export_module()
+    adapter.eval()
+    with torch.no_grad():
+        adapter(rgb_image=x)
+
+    onnx_path = tmp_path / "detector_adapter_topk.onnx"
+    torch.onnx.export(
+        adapter,
+        (),
+        str(onnx_path),
+        kwargs={"rgb_image": x},
+        dynamo=True,
+        opset_version=18,
+        input_names=["rgb_image"],
+        output_names=["scores", "anomaly_score"],
+    )
+
+    model = onnx.load(str(onnx_path))
+    topk_values = _topk_initializer_values(model)
+    assert topk_values, "expected at least one TopK node for the image score"
+    assert all(k <= MAX_TOPK for k in topk_values), (
+        f"TopK node(s) above the TensorRT cap of {MAX_TOPK}: {topk_values}"
+    )
 
 
 # ---------------------------------------------------------------------------
