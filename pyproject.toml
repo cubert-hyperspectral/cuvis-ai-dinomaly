@@ -78,14 +78,17 @@ dev = [
 # first release whose `cu3s_multi` keeps a bounded set of recordings open (`max_open_sessions`)
 # and reads ahead of the model step (`read_ahead`, `cuda_cubes`); its `[cu3s]` (cuvis SDK
 # bindings) and `[coco]` (COCO rasterization) extras are required (gRPC runs still provision the
-# plugin via configs/plugins/cuvis_ai_dataloader.yaml instead). cuvis-ai-core 0.18.4 is the first
-# release whose `PublicDatasets` fetches the lentils revision with `constraints` splits (the July
-# revision's `leakage_check` splits no longer load with cuvis-ai-schemas 0.12 and later).
+# plugin via configs/plugins/cuvis_ai_dataloader.yaml instead). cuvis-ai-core 0.19.3 is the first
+# release whose post-fit steps (decider calibration, test) reuse the readers the fit already holds:
+# before it they reopened every val recording next to the open ones, which with the Cuvis SDK on the
+# GPU ran an 8 GB card out of memory (ALL-6934). 0.18.4 already fetched the lentils revision with
+# `constraints` splits (the July revision's `leakage_check` splits no longer load with
+# cuvis-ai-schemas 0.12 and later).
 # pandas / matplotlib / huggingface-hub are imported directly by the tutorial notebooks and their
 # utils, so they are declared here rather than relied on as transitives.
 examples = [
     "cuvis-ai>=0.16.1",
-    "cuvis-ai-core[hf]>=0.18.4",
+    "cuvis-ai-core[hf]>=0.19.3",
     "cuvis-ai-dataloader[cu3s,coco]>=0.8.2",
     "pandas>=2.0.0",
     "matplotlib>=3.8.0",

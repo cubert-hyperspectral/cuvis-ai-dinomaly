@@ -69,12 +69,13 @@ uv run --no-sync jupyter lab    # then open notebooks/lentils_anomaly/lentils_rg
 - Every knob (`MAX_EPOCHS` / `IMAGE_SIZE` / `MAX_OPEN_SESSIONS` / `READ_AHEAD`, and inference's
   `PIPELINE_DIR` / `TEST_LIMIT`) is a plain variable at the top of each notebook's setup cell;
   edit it in place. The reader defaults (3 open recordings, 1 frame read ahead) fit an 8 GB GPU;
-  on a 24 GB GPU use 15 and 2.
+  on a 24 GB GPU 6 open recordings make an epoch about twice as fast.
 
 **3b. Or run the scripts (full-fidelity 20/50-epoch runs)**
 
 ```bash
-# 448px, AdamW, best-checkpoint, cu3s reader defaults for a 24 GB GPU (configs/trainrun, data.reader).
+# 448px, AdamW, best-checkpoint, cu3s reader defaults for an 8 GB GPU (configs/trainrun, data.reader);
+# on a 24 GB GPU add data.reader.max_open_sessions=6.
 # <UNIVERSE> = <data_dir>/XMR_Industrial_Foreign_Object_Detection_Lentils/universe.csv,
 # <SPLITS_JSON> = the splits/dinomaly.json next to it.
 uv run python examples/train_dinomaly_rgb_multifile.py     data.universe_csv=<UNIVERSE> data.splits_json=<SPLITS_JSON> output_dir=<OUT>/rgb     training.max_epochs=20
@@ -94,7 +95,7 @@ See *Scripts* below for the full-fidelity knobs and the learnable-Concrete varia
 | package | version |
 |---|---|
 | cuvis-ai | ≥ 0.16.1 |
-| cuvis-ai-core | ≥ 0.17.1 |
+| cuvis-ai-core | ≥ 0.19.3 (the post-fit calibration reuses the fit's open recordings; an 8 GB GPU with the SDK on the GPU needs it) |
 | cuvis-ai-schemas | ≥ 0.12.0 |
 | cuvis-ai-dataloader | ≥ 0.8.2 (`MultiCu3sDataModule` / `cu3s_multi` with a bounded set of open recordings and `read_ahead`) |
 | anomalib | 2.1.0 |
@@ -159,8 +160,8 @@ notebook at it via its `PIPELINE_DIR` variable.
 The Hydra scripts in `examples/` are the canonical path for the definitive 50-epoch numbers
 (they add the LR scheduler + all knobs the notebooks omit for clarity). They take
 `data.universe_csv` + `data.splits_json` (the two files above) and the cu3s reader options under
-`data.reader` (defaults for a 24 GB GPU; on 8 GB add `data.reader.max_open_sessions=3
-data.reader.read_ahead=1 data.reader.cuda_cubes=false`).
+`data.reader` (defaults for an 8 GB GPU; on a 24 GB GPU add
+`data.reader.max_open_sessions=6`).
 
 ```bash
 # RGB (fixed wavelengths). <UNIVERSE>/<SPLITS_JSON> = universe.csv / splits/dinomaly.json; <OUT> = output dir.

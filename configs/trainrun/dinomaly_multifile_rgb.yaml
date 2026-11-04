@@ -30,14 +30,15 @@ data:
   # The SDK reads in the training process; DataLoader workers cannot use it on the GPU.
   num_workers: 0
   # Reader options, passed to MultiCu3sDataModule as they are. Every open recording holds about
-  # 0.3 to 0.6 GB of GPU memory, in the train and in the val loader. These values fit a 24 GB GPU:
-  # all 15 recordings may stay open, two frames are read ahead of the model step and the cubes stay
-  # on the GPU. On an 8 GB GPU use max_open_sessions: 3, read_ahead: 1, cuda_cubes: false.
-  # sdk_cuda: false processes the cubes on the CPU instead (fits any GPU, slower).
+  # 0.3 to 0.6 GB of GPU memory, and the train and the val loader each keep their own set. These
+  # values fit an 8 GB GPU (a laptop); on a 24 GB GPU 6 open recordings make an epoch about twice
+  # as fast (examples/LENTILS_TRAINING.md, section 4b). sdk_cuda: false processes the cubes on the
+  # CPU instead (no extra GPU memory, slower).
   reader:
-    max_open_sessions: 15
-    read_ahead: 2
-    cuda_cubes: true
+    max_open_sessions: 3
+    read_ahead: 1
+    cuda_cubes: false
+    sdk_cuda: true
 
 dinomaly:
   use_center_crop: false

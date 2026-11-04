@@ -200,15 +200,22 @@ def main() -> None:
     p.add_argument("--batch-size", type=int, default=1)
     p.add_argument("--processing-mode", type=str, default="Reflectance")
     # Reader options (MultiCu3sDataModule). Every open recording holds about 0.3 to 0.6 GB of GPU
-    # memory; the lentils test split reads 14 recordings.
+    # memory; the defaults fit an 8 GB GPU. The test split is read in order, so every recording
+    # opens once per pass.
     p.add_argument(
-        "--max-open-sessions", type=int, default=15, help="recordings kept open (default 15)"
+        "--max-open-sessions", type=int, default=3, help="recordings kept open (default 3)"
     )
     p.add_argument(
-        "--read-ahead", type=int, default=2, help="frames read ahead of the model (default 2)"
+        "--read-ahead", type=int, default=1, help="frames read ahead of the model (default 1)"
     )
     p.add_argument(
         "--cuda-cubes", action="store_true", help="hand the cubes out on the GPU (needs the room)"
+    )
+    p.add_argument(
+        "--sdk-cuda",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="process the cubes with the Cuvis SDK on the GPU; --no-sdk-cuda uses the CPU (slower)",
     )
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--strict-weights", action="store_true")
@@ -265,6 +272,7 @@ def main() -> None:
         max_open_sessions=args.max_open_sessions,
         read_ahead=args.read_ahead,
         cuda_cubes=args.cuda_cubes,
+        sdk_cuda=args.sdk_cuda,
     )
 
     datamodule.setup(stage="test")

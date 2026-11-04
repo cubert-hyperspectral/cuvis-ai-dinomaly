@@ -62,7 +62,7 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 | package | version |
 |---|---|
 | cuvis-ai | ≥ 0.16.1 |
-| cuvis-ai-core | ≥ 0.17.1 |
+| cuvis-ai-core | ≥ 0.19.3 (the post-fit calibration reuses the fit's open recordings; an 8 GB GPU with the SDK on the GPU needs it) |
 | cuvis-ai-schemas | ≥ 0.12.0 |
 | cuvis-ai-dataloader | ≥ 0.8.2 (`MultiCu3sDataModule` with a bounded set of open recordings, `read_ahead`, `cuda_cubes`) |
 | anomalib | 2.1 |
@@ -92,17 +92,20 @@ HF dataset ships both inputs next to its `data/` folder:
 
 `data.num_workers` stays 0: the SDK reads in the training process, and DataLoader workers cannot
 use it on the GPU (on Windows they fail outright, on Linux CUDA does not initialise in a forked
-worker). The `data.reader` defaults fit a 24 GB GPU:
+worker). The `data.reader` defaults fit an 8 GB GPU (a laptop):
 
 | key | default | meaning |
 |---|---|---|
-| `max_open_sessions` | 15 | recordings kept open per loader; every open one holds about 0.3 to 0.6 GB of GPU memory, in the train and in the val loader. 15 covers every lentils recording; fewer means reopening (about 1 to 2 s each) during a shuffled epoch |
-| `read_ahead` | 2 | frames read ahead of the model step, on reader threads |
-| `cuda_cubes` | true | the cubes stay on the GPU instead of a round trip through host memory |
-| `sdk_cuda` | true (dataloader default) | `false` processes the cubes on the CPU: fits any GPU, but slower |
+| `max_open_sessions` | 3 | recordings kept open per loader; every open one holds about 0.3 to 0.6 GB of GPU memory, and the train and the val loader each keep their own set. More open recordings mean fewer reopens (about 1 to 2 s each) during a shuffled epoch |
+| `read_ahead` | 1 | frames read ahead of the model step, on reader threads |
+| `cuda_cubes` | false | `true` keeps the cubes on the GPU instead of a round trip through host memory |
+| `sdk_cuda` | true (dataloader default) | `false` processes the cubes on the CPU: no extra GPU memory, but slower |
 
-On an 8 GB GPU use `data.reader.max_open_sessions=3 data.reader.read_ahead=1
-data.reader.cuda_cubes=false`.
+On a 24 GB GPU add `data.reader.max_open_sessions=6`: in a 5-epoch RGB run on an RTX 4090 an
+epoch took 89 s instead of 176 s, at 13 GB of GPU memory instead of 9 GB. Keeping all 15
+recordings open is faster still but needs about 21 GB, and with `read_ahead: 2` and
+`cuda_cubes: true` together it crashed the Cuvis SDK in longer runs (an illegal memory access in
+its GPU memory pool, after 1 to 7 epochs).
 
 Each batch carries `cube` `[B, H, W, 61]` float32, `wavelengths` `[B, 61]` int32 and `mask`
 `[B, H, W]` int32 with the per-pixel COCO category ids (0 = background; a recording without a

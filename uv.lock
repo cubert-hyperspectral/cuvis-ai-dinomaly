@@ -510,7 +510,7 @@ wheels = [
 
 [[package]]
 name = "cuvis-ai-core"
-version = "0.19.1"
+version = "0.19.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -544,9 +544,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/5f/f72307bfbc3d1ba53e0367b464ca805e6952a2508b1bc4c6c330de888ed9/cuvis_ai_core-0.19.1.tar.gz", hash = "sha256:1244bd4a2565b007b9d8e9be75296b50255304141a3847c9ba0bb92568424c80", size = 1124009, upload-time = "2026-11-03T11:06:10.834Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/c9/b2f2f5246831d2839b62d84b07da208783c802046a827dd8f8ba42cf66d8/cuvis_ai_core-0.19.3.tar.gz", hash = "sha256:a4d4f709de06641db627a9f1f5fc163d834c25547f70c053b148704d6674c4a6", size = 1129274, upload-time = "2026-11-04T14:01:23.862Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/6a/dd3bdada1088c9fa1f828fd8cdaa9d3d3a66a6366618395e3dfa1b96646a/cuvis_ai_core-0.19.1-py3-none-any.whl", hash = "sha256:377cbdc144063e9a47243986e68e8ac0f448c64a2faba8dc227df8115d06d0fb", size = 406996, upload-time = "2026-11-03T11:06:09.314Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/be/76fde58c9db4c6e6586730e8b9d5e8a79eeae4245a59db783d9fd87d8608/cuvis_ai_core-0.19.3-py3-none-any.whl", hash = "sha256:5cee19e8e839fed0f8b6c6da6cdaa996ae72e30ab93a8413af14bcd2041ae530", size = 409191, upload-time = "2026-11-04T14:01:22.012Z" },
 ]
 
 [package.optional-dependencies]
@@ -626,7 +626,7 @@ requires-dist = [
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=1.7.5" },
     { name = "cuvis-ai", marker = "extra == 'examples'", specifier = ">=0.16.1" },
     { name = "cuvis-ai-core", extras = ["hf"], specifier = ">=0.17.1" },
-    { name = "cuvis-ai-core", extras = ["hf"], marker = "extra == 'examples'", specifier = ">=0.18.4" },
+    { name = "cuvis-ai-core", extras = ["hf"], marker = "extra == 'examples'", specifier = ">=0.19.3" },
     { name = "cuvis-ai-dataloader", extras = ["coco", "cu3s"], marker = "extra == 'examples'", specifier = ">=0.8.2" },
     { name = "cuvis-ai-schemas", specifier = ">=0.12.0" },
     { name = "defusedxml", specifier = ">=0.7.1" },
