@@ -5,12 +5,13 @@
 # plugin's pyproject. Provision it before running an example (e.g. core's `provision` CLI, or
 # `--plugins-dir configs/plugins`). v0.8.2 is the first release whose `cu3s_multi` bounds its
 # open recordings (`max_open_sessions`) and reads ahead of the model step (`read_ahead`).
+# The pin is v0.9.1, the first release that installs on Python 3.12 and 3.13 (Colab).
 #
 # Dev: uncomment the local path source to run against a sibling checkout instead of the tag.
 name: cuvis_ai_dataloader
 # path: "../../../cuvis-ai-dataloader/cuvis-ai-dataloader"
 repo: "https://github.com/cubert-hyperspectral/cuvis-ai-dataloader.git"
-tag: "v0.8.2"
+tag: "v0.9.1"
 package_name: cuvis-ai-dataloader
 capabilities:
   - { class_name: cuvis_ai_dataloader.data.datamodule_cu3s.Cu3sDataModule,              kind: data_module, data_module_name: cu3s,        extras: [cu3s, coco] }
