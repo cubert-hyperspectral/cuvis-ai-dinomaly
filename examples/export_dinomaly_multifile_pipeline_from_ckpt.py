@@ -25,17 +25,16 @@ from pathlib import Path
 from typing import Literal
 
 import torch
+from cu3s_data import build_cu3s_datamodule
 from cuvis_ai.node.channel_selector import CIRSelector, FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
 from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
-from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PipelineMetadata
@@ -68,19 +67,7 @@ def build_pipeline_and_datamodule(
 
     # Export runs a fresh StatisticalTrainer pass over the cu3s recordings, read in this process
     # (num_workers 0) with the trainrun's reader options (data.reader).
-    backend = str(cfg.data.get("data_module", "cu3s_multi"))
-    if backend != "cu3s_multi":
-        raise ValueError(f"data.data_module must be 'cu3s_multi', got {backend!r}.")
-    splits_json = cfg.data.get("splits_json")
-    datamodule = MultiCu3sDataModule(
-        universe_csv=str(cfg.data.universe_csv),
-        splits=load_splits(splits_json) if splits_json else None,
-        batch_size=int(cfg.data.batch_size),
-        num_workers=0,
-        processing_mode=str(cfg.data.processing_mode),
-        **(cfg.data.get("reader") or {}),
-    )
-    datamodule.setup(stage="fit")
+    datamodule = build_cu3s_datamodule(cfg.data)
 
     dcfg = cfg.dinomaly
     pipeline = CuvisPipeline(f"dinomaly_multifile_{band_mode}")

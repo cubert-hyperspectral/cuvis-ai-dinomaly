@@ -9,18 +9,17 @@ from typing import Literal
 
 import pytorch_lightning as pl
 import torch
+from cu3s_data import build_cu3s_datamodule
 from cuvis_ai.node.channel_selector import CIRSelector, FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
 from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
-from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.training.config import create_callbacks_from_config
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import (
     CallbacksConfig,
@@ -103,23 +102,7 @@ def run_dinomaly_multifile_training(
     output_dir = Path(cfg.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # The cu3s recordings are read directly: `data.universe_csv` lists the frames and
-    # `data.splits_json` (a core DataSplitConfig) assigns them to train / val / test; without it
-    # the universe.csv needs a `split` column. `data.reader` holds the MultiCu3sDataModule reader
-    # options (max_open_sessions, read_ahead, cuda_cubes, sdk_cuda, read_threads).
-    backend = str(cfg.data.get("data_module", "cu3s_multi"))
-    if backend != "cu3s_multi":
-        raise ValueError(f"data.data_module must be 'cu3s_multi', got {backend!r}.")
-    splits_json = cfg.data.get("splits_json")
-    datamodule = MultiCu3sDataModule(
-        universe_csv=cfg.data.universe_csv,
-        splits=load_splits(splits_json) if splits_json else None,
-        batch_size=cfg.data.batch_size,
-        num_workers=int(cfg.data.get("num_workers", 0)),
-        processing_mode=cfg.data.processing_mode,
-        **(cfg.data.get("reader") or {}),
-    )
-    datamodule.setup(stage="fit")
+    datamodule = build_cu3s_datamodule(cfg.data)
 
     dcfg = cfg.dinomaly
     pipeline = CuvisPipeline(f"dinomaly_multifile_{band_mode}")
