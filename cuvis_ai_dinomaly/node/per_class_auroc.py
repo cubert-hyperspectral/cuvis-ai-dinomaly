@@ -48,8 +48,8 @@ class PerClassAnomalyAUROC(_StreamingBinnedAUROC):
         as ``AnomalyDataNode`` exposes it from an ``npz_multi`` batch
     category_mask : ``[B, H, W] int32``
         The same class ids as the cu3s data modules deliver them in the batch ``mask`` (via a
-        ``CU3SDataNode`` passthrough); read when ``class_mask`` is not connected. One of the two
-        must carry the ids.
+        ``CU3SDataNode`` passthrough), instead of ``class_mask``. Exactly one of the two carries
+        the ids; neither or both raises.
 
     Output ports
     ------------
@@ -77,7 +77,7 @@ class PerClassAnomalyAUROC(_StreamingBinnedAUROC):
             shape=(-1, -1, -1),
             description=(
                 "Per-pixel class ids [B, H, W] as the cu3s data modules deliver them in the batch "
-                "mask; read when class_mask is not connected"
+                "mask; connect this or class_mask, not both"
             ),
             optional=True,
         ),
@@ -135,6 +135,10 @@ class PerClassAnomalyAUROC(_StreamingBinnedAUROC):
         class_mask: Tensor | None = None,
         category_mask: Tensor | None = None,
     ) -> dict[str, Any]:
+        if class_mask is not None and category_mask is not None:
+            raise ValueError(
+                f"{self.name}: class ids arrive on both class_mask and category_mask; connect one"
+            )
         if class_mask is not None:
             class_ids = class_mask.squeeze(-1)
         elif category_mask is not None:

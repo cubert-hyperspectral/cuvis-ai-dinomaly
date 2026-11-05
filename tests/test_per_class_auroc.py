@@ -123,6 +123,19 @@ def test_without_class_ids_raises() -> None:
         node.forward(scores=torch.zeros(1, 2, 2, 1), context=_ctx())
 
 
+def test_both_class_id_ports_raise() -> None:
+    """Both connected (a graph half moved from npz_multi) is a wiring error, not a silent pick."""
+    node = PerClassAnomalyAUROC(class_names=CLASS_NAMES)
+    ids = torch.zeros(1, 2, 2, dtype=torch.int32)
+    with pytest.raises(ValueError, match="both"):
+        node.forward(
+            scores=torch.zeros(1, 2, 2, 1),
+            context=_ctx(),
+            class_mask=ids.unsqueeze(-1),
+            category_mask=ids,
+        )
+
+
 def test_category_mask_port_accepts_cu3s_data_node_mask() -> None:
     """The mask output of cuvis-ai's CU3SDataNode ([B, H, W] int32) binds to category_mask;
     class_mask keeps its [B, H, W, 1] contract, and both ports are optional."""
