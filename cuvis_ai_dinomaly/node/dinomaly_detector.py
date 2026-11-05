@@ -13,8 +13,11 @@ from cuvis_ai_schemas.enums import ExecutionStage, NodeCategory, NodeTag
 from cuvis_ai_schemas.execution import Context
 from cuvis_ai_schemas.pipeline import PortSpec
 from loguru import logger
-from torch import Tensor
+from torch import Tensor, nn
 from torchvision.transforms.v2 import CenterCrop, Compose, Normalize, Resize
+
+from cuvis_ai_dinomaly.node._antialias_resize_matrix import AntialiasResizeMatrix
+from cuvis_ai_dinomaly.node._bounded_topk_mean import bounded_topk_mean
 
 
 class _AreaAlignF:
@@ -81,6 +84,108 @@ def _area_anomaly_map_upsample(enabled: bool) -> Iterator[None]:
         _tm.F = real_f
 
 
+class _DetectorExportAdapter(nn.Module):
+    """``DinomalyDetector`` at inference as tensor ops, for :meth:`Node.export_module`.
+
+    Reproduces ``DinomalyDetector.forward`` at ``ExecutionStage.INFERENCE`` exactly,
+    with every branch the dynamo exporter cannot trace rewritten as graph ops:
+
+    - the ``float(x.max())`` input-scaling heuristic becomes a ``torch.where`` chain
+      on the tensor max instead of a Python branch on a Python float;
+    - the preprocessing ``Resize`` (antialiased bilinear, a fixed ``Resize`` ONNX op
+      TensorRT refuses) becomes :class:`AntialiasResizeMatrix`, two buffers applied
+      with ``einsum``, built eagerly from the node's own resize on the first call;
+    - ``torch.compile`` is never applied (the adapter always runs the eager model).
+
+    The resize matrices are not known until the first real input is seen, so the
+    adapter must run one eager forward (outside tracing) before it is exported;
+    :meth:`DinomalyDetector.export_module` does not do this call itself because the
+    exporter's own eager parity check (``PipelineSpanModule`` run with
+    ``use_adapters=True``) already provides it before tracing starts.
+
+    The image score is not read off ``model(x).pred_score``: anomalib's
+    ``DinomalyModel.forward`` computes it with
+    ``torch.sort(flat, descending=True)[0][:, :k].mean(dim=1)`` on the anomaly map
+    resized to a fixed 256x256 (``anomalib.models.image.dinomaly.torch_model.
+    DEFAULT_RESIZE_SIZE``) and Gaussian-blurred, with ``k = int(N * 0.01)``
+    (``DEFAULT_MAX_RATIO``); a full descending sort lowers to an ONNX ``TopK``
+    node whose ``K`` is the full element count, which TensorRT's ``ITopKLayer``
+    refuses above 3840. The adapter calls the model's own
+    ``get_encoder_decoder_outputs`` and ``calculate_anomaly_maps`` (the two
+    pieces before the score, unchanged) and its ``gaussian_blur`` module, then
+    gets the same number as the sorted-and-sliced mean from
+    :func:`bounded_topk_mean`, which never asks any one ``torch.topk`` for more
+    than :data:`cuvis_ai_dinomaly.node._bounded_topk_mean.MAX_TOPK` values.
+    """
+
+    def __init__(self, node: DinomalyDetector) -> None:
+        super().__init__()
+        self.model = node.dinomaly_model
+        self.use_center_crop = node.use_center_crop
+        if node.use_center_crop:
+            self.crop = CenterCrop(node.crop_size)
+        self.resize = AntialiasResizeMatrix(node.image_size)
+        self.register_buffer(
+            "mean", torch.tensor(node.IMAGENET_MEAN, dtype=torch.float32).reshape(1, -1, 1, 1)
+        )
+        self.register_buffer(
+            "std", torch.tensor(node.IMAGENET_STD, dtype=torch.float32).reshape(1, -1, 1, 1)
+        )
+
+        from anomalib.models.image.dinomaly.torch_model import (
+            DEFAULT_MAX_RATIO,
+            DEFAULT_RESIZE_SIZE,
+        )
+
+        self._score_resize_size = DEFAULT_RESIZE_SIZE
+        self._score_k = int(DEFAULT_RESIZE_SIZE * DEFAULT_RESIZE_SIZE * DEFAULT_MAX_RATIO)
+
+    def _image_score(self, amap_model_res: Tensor) -> Tensor:
+        """Anomalib's image score, computed with a bounded top-k in place of sort.
+
+        ``amap_model_res`` is the anomaly map at the model's own resolution (the
+        ``out_size`` ``get_encoder_decoder_outputs``/``calculate_anomaly_maps``
+        produce, before any resize toward the input frame). Mirrors
+        ``DinomalyModel.forward``'s inference branch exactly: resize to a fixed
+        256x256, Gaussian blur, mean of the top one percent values.
+        """
+        resized = F.interpolate(
+            amap_model_res, size=self._score_resize_size, mode="bilinear", align_corners=False
+        )
+        blurred = self.model.gaussian_blur(resized)
+        flat = blurred.flatten(1)
+        return bounded_topk_mean(flat, self._score_k)
+
+    def forward(self, rgb_image: Tensor) -> dict[str, Tensor]:
+        """``rgb_image`` is ``[B, H, W, C]``; returns ``scores`` and ``anomaly_score``."""
+        x = rgb_image.float()
+        max_val = x.max()
+        scale = torch.where(
+            max_val > 255.0,
+            max_val,
+            torch.where(max_val > 1.0, torch.full_like(max_val, 255.0), torch.ones_like(max_val)),
+        )
+        x = (x / scale).clamp(0.0, 1.0)
+        x = x.permute(0, 3, 1, 2)
+        x = self.resize(x)
+        if self.use_center_crop:
+            x = self.crop(x)
+        x = (x - self.mean) / self.std
+
+        with _area_anomaly_map_upsample(True):
+            en, de = self.model.get_encoder_decoder_outputs(x)
+            amap_model_res, _ = self.model.calculate_anomaly_maps(en, de, out_size=x.shape[-2:])
+
+        anomaly_score = self._image_score(amap_model_res)
+
+        h, w = rgb_image.shape[1], rgb_image.shape[2]
+        scores = F.interpolate(amap_model_res, size=(h, w), mode="bilinear", align_corners=False)
+        return {
+            "scores": scores.permute(0, 2, 3, 1).float(),
+            "anomaly_score": anomaly_score.float(),
+        }
+
+
 class DinomalyDetector(Node):
     """Pixel-level anomaly detection using Anomalib's ``DinomalyModel``.
 
@@ -125,6 +230,7 @@ class DinomalyDetector(Node):
             NodeTag.RECONSTRUCTION,
             NodeTag.LEARNABLE,
             NodeTag.TORCH,
+            NodeTag.ONNX,
         }
     )
 
@@ -457,6 +563,18 @@ class DinomalyDetector(Node):
         self._frozen = True
         for p in self.dinomaly_model.parameters():
             p.requires_grad_(False)
+
+    def export_module(self) -> nn.Module:
+        """The ONNX span exporter's stand-in for :meth:`forward` at inference.
+
+        Returns a :class:`_DetectorExportAdapter` built from this (already copied,
+        eval-mode) node: same input scaling and preprocessing, no ``.item()``, no
+        numpy, no Python branch on a tensor value, and the antialiased resize
+        replaced by an equivalent matrix operator a TensorRT graph accepts (see
+        :class:`AntialiasResizeMatrix`). Training-only state (``torch.compile``,
+        the training-loss path) is not part of this adapter: it is inference-only.
+        """
+        return _DetectorExportAdapter(self)
 
     def _rgb_bhwc_to_model_input(self, rgb_image: Tensor) -> Tensor:
         x = rgb_image
