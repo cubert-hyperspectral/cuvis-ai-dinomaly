@@ -21,17 +21,14 @@ val 148 / test 180 (adaclip_train 500 held out in ``splits/adaclip.json``).
 Data workflow (the selector split model)
 ----------------------------------------
 1. Download the cu3s dataset from HF via
-   :class:`cuvis_ai_core.data.public_datasets.PublicDatasets`.
-2. Convert the frames ``splits/dinomaly.json`` selects to per-frame NPZ (baked ``mask`` +
-   ``class_mask``) with cuvis-ai-dataloader's ``convert_universe``, emitting two artifacts: a
-   **universe.csv** (``source, index, materialized_path``: the sample universe, one row per frame)
-   and a baked **splits.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors). The
-   generated splits.json is identical to the dataset's shipped ``splits/dinomaly.json``.
-3. Train / infer from the NPZ via ``MultiNpzDataModule`` (``npz_multi``), given the splits.json
-   (``DataSplitConfig(splits_path=...)``) resolved over the ``universe_csv``.
+   :class:`cuvis_ai_core.data.public_datasets.PublicDatasets`. It ships a **universe.csv**
+   (``source, index, annotation, group, tags``: the sample universe, one row per frame) and
+   **splits/dinomaly.json** (a core ``DataSplitConfig`` of ``file_indices`` selectors).
+2. Train / infer straight from the cu3s recordings via ``MultiCu3sDataModule`` (``cu3s_multi``),
+   given the splits.json (``DataSplitConfig(splits_path=...)``) resolved over the
+   ``universe_csv``. Its batch ``mask`` holds the per-pixel COCO category ids.
 
-The notebooks run steps 1-2 directly with ``PublicDatasets.download_dataset`` +
-``convert_universe``.
+The notebooks run step 1 directly with ``PublicDatasets.download_dataset``.
 """
 
 from __future__ import annotations
@@ -110,23 +107,6 @@ def resolve_pipeline(pipeline_dir: str | Path = DEFAULT_PIPELINE_DIR) -> tuple[P
     return yaml_path, pt_path
 
 
-# --------------------------------------------------------------------------- data
-def load_lentils_frame(npz_path: str | Path) -> dict[str, np.ndarray]:
-    """Load a per-frame NPZ -> ``{cube [H,W,C] f32, wavelengths [C] i32, mask [H,W] i32,
-    class_mask [H,W] u8}`` (mask/class_mask zeros when the frame is normal / unbaked)."""
-    with np.load(npz_path) as z:
-        cube = np.asarray(z["cube"], dtype=np.float32)
-        wl = np.asarray(z["wavelengths"]).ravel().astype(np.int32, copy=False)
-        h, w = cube.shape[0], cube.shape[1]
-        mask = np.asarray(z["mask"], np.int32) if "mask" in z.files else np.zeros((h, w), np.int32)
-        class_mask = (
-            np.asarray(z["class_mask"], np.uint8)
-            if "class_mask" in z.files
-            else np.zeros((h, w), np.uint8)
-        )
-    return {"cube": cube, "wavelengths": wl, "mask": mask, "class_mask": class_mask}
-
-
 # --------------------------------------------------------------------------- visualisation
 def _norm(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x, np.float32)
@@ -183,16 +163,17 @@ def render_inference_panel(
 def panel_frames(collected: list, datamodule: Any) -> list[dict[str, Any]]:
     """Flatten a ``Predictor`` collect run into one slim record per frame for the panels.
 
-    Pulls the anomaly ``scores`` map, binary ``mask``, and per-frame ``anomaly_score`` out of each
-    per-batch ``(node, port)`` output dict (already moved to CPU by ``collect_ports``), plus the
-    frame's NPZ ``path`` / ``index`` from the predict dataset. The ground-truth cube for false-color
-    rendering is reloaded from that path by the caller; per-class AUROC comes from the metric node,
-    so neither the cube nor the multi-class mask is flattened here.
+    Pulls the anomaly ``scores`` map, the data node's binary ``mask``, and per-frame
+    ``anomaly_score`` out of each per-batch ``(node, port)`` output dict (already moved to CPU by
+    ``collect_ports``), plus the frame's ``position`` in the predict dataset and its recording
+    ``path`` / ``index``. The caller reads the cube for false-color rendering again through
+    ``datamodule.predict_ds[position]``; per-class AUROC comes from the metric node, so neither the
+    cube nor the multi-class mask is flattened here.
     """
 
-    def _port(batch_out: dict, port: str) -> Any:
-        for (_node, name), value in batch_out.items():
-            if name == port and value is not None:
+    def _port(batch_out: dict, port: str, node: str | None = None) -> Any:
+        for (node_name, name), value in batch_out.items():
+            if name == port and value is not None and node in (None, node_name):
                 return value
         return None
 
@@ -207,7 +188,7 @@ def panel_frames(collected: list, datamodule: Any) -> list[dict[str, Any]]:
     for batch_out in collected:
         scores = _port(batch_out, "scores")
         ascore = _port(batch_out, "anomaly_score")
-        mask = _port(batch_out, "mask")
+        mask = _port(batch_out, "mask", node="anomaly_data")
         bsz = int((scores if scores is not None else mask).shape[0])
         for i in range(bsz):
             rec = records[offset + i] if records is not None and offset + i < len(records) else {}
@@ -220,6 +201,7 @@ def panel_frames(collected: list, datamodule: Any) -> list[dict[str, Any]]:
                     "score_map": None if score is None else score.astype(np.float32),
                     "anomaly_score": None if ascore is None else float(ascore[i].item()),
                     "mask": None if m is None else m.astype(np.int32),
+                    "position": offset + i,
                     "path": rec.get("materialized_path") if isinstance(rec, dict) else None,
                     "index": rec.get("index") if isinstance(rec, dict) else None,
                     "is_anomalous": bool(m is not None and m.any()),

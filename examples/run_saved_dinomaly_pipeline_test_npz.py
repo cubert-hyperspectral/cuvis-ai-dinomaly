@@ -1,5 +1,8 @@
 """Run a saved Dinomaly multifile pipeline on the **test** split and write NPZ predictions.
 
+The test frames are read from the cu3s recordings with ``MultiCu3sDataModule`` (``cu3s_multi``);
+the NPZ files are the predictions this script writes, one per frame.
+
 Mirrors ``cuvis-ai/examples/adaclip/run_saved_pipeline_test_npz.py`` for the Dinomaly graph:
 load plugins, ``CuvisPipeline.load_pipeline(yaml, weights_path=pt, ...)``, then iterate
 ``test_dataloader()`` with ``ExecutionStage.TEST``.
@@ -9,11 +12,11 @@ load plugins, ``CuvisPipeline.load_pipeline(yaml, weights_path=pt, ...)``, then 
 - ``anomaly_map`` — ``dinomaly_detector.scores`` without batch dim ``[H, W]`` or ``[H, W, 1]`` squeezed.
 - ``anomaly_score`` — image-level score ``[1]`` or scalar.
 - ``binary_decisions`` — decider output (float32 for portability).
-- ``gt_mask`` — int32 category mask (same as dataloader).
+- ``gt_mask`` — int32 category mask (the per-pixel COCO category ids the dataloader reads).
 - ``rgb_image`` — CIR/RGB selector output before Dinomaly internal resize.
 - ``metric_names``, ``metric_values`` — per-batch ``AnomalyDetectionMetrics`` (TEST).
 - ``mesu_index`` — ``image_id`` (the ``index`` from the universe.csv).
-- ``source_npz_path`` or ``cu3s_path`` — frame path (Unicode 0-d array), depending on backend.
+- ``cu3s_path`` — the recording the frame was read from (Unicode 0-d array).
 
 Writes ``manifest.jsonl`` and ``test_metrics_summary.json`` (means of node metrics across
 frames + simple per-image IoU / precision / recall / F1 from saved decisions vs GT).
@@ -22,12 +25,13 @@ Example::
 
     cd /home/dev/anish/cuvis-ai-dinomaly
     uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \\
-        --pipeline-yaml /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models/dinomaly_multifile_cir.yaml \\
-        --pipeline-pt /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/trained_models/dinomaly_multifile_cir.pt \\
-        --data-module npz_multi \\
-        --universe-csv /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/universe.csv \\
-        --splits-json /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/splits.json \\
-        --output-dir /mnt/data/cuvis_ai_outputs/dinomaly_cir_npz_50ep_w0/test_predictions_npz
+        --pipeline-yaml /mnt/data/cuvis_ai_outputs/dinomaly_cir_50ep/trained_models/dinomaly_multifile_cir.yaml \\
+        --pipeline-pt /mnt/data/cuvis_ai_outputs/dinomaly_cir_50ep/trained_models/dinomaly_multifile_cir.pt \\
+        --universe-csv <lentils>/universe.csv \\
+        --splits-json <lentils>/splits/dinomaly.json \\
+        --output-dir /mnt/data/cuvis_ai_outputs/dinomaly_cir_50ep/test_predictions_npz
+
+``<lentils>`` is the HF lentils download (the cu3s recordings plus universe.csv and splits/).
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.utils.graph_helper import restructure_output_to_node_dict
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
+from cuvis_ai_dataloader.data import MultiCu3sDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.execution import Context
 from loguru import logger
@@ -188,17 +192,31 @@ def main() -> None:
         default=None,
         help="Plugin manifest (default: configs/plugins/dinomaly.yaml in this repo)",
     )
-    # NPZ backend: --universe-csv (universe) + --splits-json (a core DataSplitConfig).
-    # Both backends read a universe.csv; --data-module selects which (npz_multi needs --splits-json).
-    p.add_argument(
-        "--data-module", type=str, default="npz_multi", choices=["npz_multi", "cu3s_multi"]
-    )
-    p.add_argument("--universe-csv", type=str, default=None)
+    # The cu3s universe (--universe-csv) and its train / val / test assignment (--splits-json, a
+    # core DataSplitConfig; without it the universe.csv needs a `split` column).
+    p.add_argument("--universe-csv", type=str, required=True)
     p.add_argument("--splits-json", type=str, default=None)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--batch-size", type=int, default=1)
-    p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--processing-mode", type=str, default="Reflectance")
+    # Reader options (MultiCu3sDataModule). Every open recording holds about 0.3 to 0.6 GB of GPU
+    # memory; the defaults fit an 8 GB GPU. The test split is read in order, so every recording
+    # opens once per pass.
+    p.add_argument(
+        "--max-open-sessions", type=int, default=3, help="recordings kept open (default 3)"
+    )
+    p.add_argument(
+        "--read-ahead", type=int, default=1, help="frames read ahead of the model (default 1)"
+    )
+    p.add_argument(
+        "--cuda-cubes", action="store_true", help="hand the cubes out on the GPU (needs the room)"
+    )
+    p.add_argument(
+        "--sdk-cuda",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="process the cubes with the Cuvis SDK on the GPU; --no-sdk-cuda uses the CPU (slower)",
+    )
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--strict-weights", action="store_true")
     p.add_argument(
@@ -222,20 +240,15 @@ def main() -> None:
     if not plugins_path.is_file():
         raise FileNotFoundError(plugins_path)
 
-    backend = "npz" if args.data_module == "npz_multi" else "cu3s"
-    if not args.universe_csv:
-        raise ValueError("--universe-csv is required for both backends.")
     if not Path(args.universe_csv).is_file():
         raise FileNotFoundError(args.universe_csv)
-    if backend == "npz" and not args.splits_json:
-        raise ValueError("--data-module npz_multi also requires --splits-json.")
 
     out_dir = args.output_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device_s = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     device = torch.device(device_s)
-    logger.info("Device: {}, backend: {}", device, backend)
+    logger.info("Device: {}", device)
 
     registry = NodeRegistry()
     registry.register_plugin(str(plugins_path))
@@ -249,39 +262,27 @@ def main() -> None:
     )
     pipeline.torch_layers.eval()
 
-    common = {
-        "batch_size": args.batch_size,
-        "num_workers": args.num_workers,
-    }
-    if backend == "npz":
-        datamodule = MultiNpzDataModule(
-            universe_csv=str(args.universe_csv),
-            splits=load_splits(args.splits_json),
-            **common,
-            pin_memory=device.type == "cuda",
-            persistent_workers=False,
-        )
-    else:
-        datamodule = MultiCu3sDataModule(
-            universe_csv=str(args.universe_csv),
-            **common,
-            processing_mode=args.processing_mode,
-        )
+    # The SDK reads in this process (num_workers 0): DataLoader workers cannot use it on the GPU.
+    datamodule = MultiCu3sDataModule(
+        universe_csv=str(args.universe_csv),
+        splits=load_splits(args.splits_json) if args.splits_json else None,
+        batch_size=args.batch_size,
+        num_workers=0,
+        processing_mode=args.processing_mode,
+        max_open_sessions=args.max_open_sessions,
+        read_ahead=args.read_ahead,
+        cuda_cubes=args.cuda_cubes,
+        sdk_cuda=args.sdk_cuda,
+    )
 
     datamodule.setup(stage="test")
     if datamodule.test_ds is None or len(datamodule.test_ds) == 0:
-        raise RuntimeError("No test split in splits CSV (or test_ds empty).")
+        raise RuntimeError("No test split in the splits (or test_ds empty).")
 
     loader = datamodule.test_dataloader()
-    # Upstream MultiNpzDataModule exposes per-frame rows as `_rows` (this script predates the
-    # move and used the local datamodule's `.records`); support both.
-    records = getattr(datamodule.test_ds, "records", None)
-    if records is None:
-        records = getattr(datamodule.test_ds, "_rows", None)
-    if records is None:
-        raise RuntimeError(
-            f"{type(datamodule.test_ds).__name__} exposes neither .records nor ._rows"
-        )
+    # The recording each test frame is read from, in loader order (the test loader does not
+    # shuffle).
+    frame_sources = datamodule.test_ds.sample_sources
     manifest_path = out_dir / "manifest.jsonl"
 
     n_test = len(datamodule.test_ds)
@@ -318,14 +319,7 @@ def main() -> None:
 
             for i in range(bsz):
                 ds_idx = global_offset + i
-                rec = records[ds_idx]
-
-                if backend == "npz":
-                    frame_path = str(rec["path"])
-                    path_key = "source_npz_path"
-                else:
-                    frame_path = str(rec["cu3s_path"])
-                    path_key = "cu3s_path"
+                frame_path = str(frame_sources[ds_idx])
                 stem = Path(frame_path).stem
                 npz_name = f"{ds_idx:05d}_{stem}.npz"
                 npz_path = out_dir / npz_name
@@ -366,7 +360,7 @@ def main() -> None:
                     if mask is not None
                     else np.array([], np.int32),
                     "mesu_index": np.array(int(batch["mesu_index"][i].item()), dtype=np.int64),
-                    path_key: np.array(frame_path, dtype=str),
+                    "cu3s_path": np.array(frame_path, dtype=str),
                 }
                 if ascore is not None:
                     save_kw["anomaly_score"] = np.asarray(ascore, dtype=np.float32).reshape(-1)
@@ -382,8 +376,6 @@ def main() -> None:
                     "frame_path": frame_path,
                     "mesu_index": int(batch["mesu_index"][i].item()),
                 }
-                if backend == "npz" and rec.get("cu3s_path"):
-                    man_obj["cu3s_path"] = str(rec["cu3s_path"])
                 mf.write(json.dumps(man_obj) + "\n")
 
             global_offset += bsz
@@ -395,8 +387,8 @@ def main() -> None:
 
     summary: dict[str, object] = {
         "n_frames": int(global_offset),
-        "backend": backend,
-        "splits": str(args.universe_csv),
+        "universe_csv": str(args.universe_csv),
+        "splits_json": str(args.splits_json) if args.splits_json else None,
         "pipeline_yaml": str(yaml_path),
         "pipeline_pt": str(pt_path),
         "node_metrics_mean_over_frames": {

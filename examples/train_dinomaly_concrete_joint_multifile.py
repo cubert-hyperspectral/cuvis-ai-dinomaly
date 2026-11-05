@@ -11,18 +11,17 @@ from typing import Any
 import hydra
 import torch
 import torch.nn.functional as F
+from cu3s_data import build_cu3s_datamodule
 from cuvis_ai.node.channel_mixer import ConcreteChannelMixer
 from cuvis_ai.node.data import LentilsAnomalyDataNode
 from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
-from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.node import Node
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
 from cuvis_ai_schemas.enums import ExecutionStage
 from cuvis_ai_schemas.pipeline import PipelineMetadata, PortSpec
 from cuvis_ai_schemas.training import (
@@ -87,33 +86,9 @@ def main(cfg: DictConfig) -> None:
     output_dir = Path(cfg.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Backend from data.data_module (both read the shared universe.csv):
-    # npz_multi (default) = data.universe_csv + data.splits_json; cu3s_multi = data.universe_csv.
-    common_loader_kwargs = {
-        "batch_size": cfg.data.batch_size,
-        "num_workers": int(cfg.data.get("num_workers", 0)),
-    }
-    backend = str(cfg.data.get("data_module", "npz_multi"))
-    if backend == "npz_multi":
-        datamodule = MultiNpzDataModule(
-            universe_csv=cfg.data.universe_csv,
-            splits=load_splits(cfg.data.splits_json),
-            **common_loader_kwargs,
-            pin_memory=bool(cfg.data.get("pin_memory", True)),
-            persistent_workers=bool(cfg.data.get("persistent_workers", True)),
-            worker_multiprocessing_context=str(
-                cfg.data.get("worker_multiprocessing_context", "spawn")
-            ),
-        )
-    elif backend == "cu3s_multi":
-        datamodule = MultiCu3sDataModule(
-            universe_csv=cfg.data.universe_csv,
-            **common_loader_kwargs,
-            processing_mode=cfg.data.processing_mode,
-        )
-    else:
-        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
-    datamodule.setup(stage="fit")
+    # The cu3s recordings are read directly: data.universe_csv lists the frames, data.splits_json
+    # assigns them to train / val / test, data.reader holds the MultiCu3sDataModule reader options.
+    datamodule = build_cu3s_datamodule(cfg.data)
 
     first_batch = next(iter(datamodule.train_dataloader()))
     input_channels = int(first_batch["cube"].shape[-1])

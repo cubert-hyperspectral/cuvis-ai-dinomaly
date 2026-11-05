@@ -23,7 +23,7 @@ DINOv2 encoder expects.
 - **RGB** and **CIR** share the trainer module `dinomaly_multifile_train_common.py`
   (`run_dinomaly_multifile_training(cfg, band_mode="rgb"|"cir", ...)`).
 - **AdaCLIP-bands** is **standalone** (it resolves the band indices to wavelengths from the first
-  train NPZ at runtime, then builds a fixed selector on them).
+  train frame at runtime, then builds a fixed selector on them).
 
 There are also `train_dinomaly_concrete_*_multifile.py` scripts (a *learnable* Concrete band
 selector). Only `train_dinomaly_concrete_joint_multifile.py` is wired up; the other two route
@@ -61,51 +61,56 @@ Training is two-phase: `StatisticalTrainer` initialises the MinMax normaliser's 
 
 | package | version |
 |---|---|
-| cuvis-ai | ≥ 0.10 |
-| cuvis-ai-core | ≥ 0.10 |
-| cuvis-ai-schemas | ≥ 0.7 |
-| cuvis-ai-dataloader | ≥ 0.5 (provides `MultiNpzDataModule` / `MultiCu3sDataModule` / `convert_universe`) |
+| cuvis-ai | ≥ 0.16.1 |
+| cuvis-ai-core | ≥ 0.19.3 (the post-fit calibration reuses the fit's open recordings; an 8 GB GPU with the SDK on the GPU needs it) |
+| cuvis-ai-schemas | ≥ 0.12.0 |
+| cuvis-ai-dataloader | ≥ 0.8.2 (`MultiCu3sDataModule` with a bounded set of open recordings, `read_ahead`, `cuda_cubes`) |
 | anomalib | 2.1 |
 
 - A **CUDA GPU** is required (~148 M params, ~592 MB saved pipeline).
-- Set `CUVIS=/lib/cuvis` (path to the Cuvis SDK) in the environment.
+- The **Cuvis C SDK** reads the cu3s recordings: set `CUVIS=/lib/cuvis` (path to the SDK) in the
+  environment.
 - The Dinomaly plugin is registered from `configs/plugins/dinomaly.yaml` (the scripts do this themselves).
 
 ---
 
 ## 4. Data
 
-### 4a. Split artifacts (what you pass in `data`)
+### 4a. What you pass in `data`
 
-The backend is chosen by `data.data_module` (both read the shared `universe.csv`):
+The scripts read the cu3s recordings directly with cuvis-ai-dataloader's `MultiCu3sDataModule`
+(`data_module: cu3s_multi`, `processing_mode: Reflectance`). Nothing is converted beforehand. The
+HF dataset ships both inputs next to its `data/` folder:
 
-- **NPZ backend** (`data_module: npz_multi`, the default) — set `data.universe_csv` (the universe
-  lookup `source, index, materialized_path`) **and** `data.splits_json` (a core `DataSplitConfig`
-  whose `file_indices` selectors assign train/val/test). Both are produced by
-  `convert_universe`. This is the fast path and what we used.
-- **cu3s backend** (`data_module: cu3s_multi`) — set `data.universe_csv` at a cu3s universe.csv
-  (a module-owned `split` column, or add a `splits_json`); reads cu3s directly
-  (`processing_mode: Reflectance`).
+- `data.universe_csv`: `universe.csv`, one row per frame (`source, index, annotation, group,
+  tags`: the recording, the frame's index in it, its COCO file).
+- `data.splits_json`: `splits/dinomaly.json`, a core `DataSplitConfig` whose `file_indices`
+  selectors assign train/val/test. Without it, the universe.csv needs a `split` column.
+- `data.reader`: the reader options, passed to `MultiCu3sDataModule` as they are (see 4b).
 
-`split ∈ {train, val, test}` are consumed; any other value (e.g. `adaclip_train`) is ignored.
+### 4b. Reader settings
 
-### 4b. Per-frame NPZ contents (NPZ backend)
+`data.num_workers` stays 0: the SDK reads in the training process, and DataLoader workers cannot
+use it on the GPU (on Windows they fail outright, on Linux CUDA does not initialise in a forked
+worker). The `data.reader` defaults fit an 8 GB GPU (a laptop):
 
-Each `.npz` holds:
-
-| key | shape / dtype | notes |
+| key | default | meaning |
 |---|---|---|
-| `cube` | `[H, W, 61]` float32 | the hyperspectral cube (VNIR 430–910 nm) |
-| `wavelengths` | `[61]` int32 | per-channel nm (selectors + AdaCLIP index→nm use this) |
-| `mask` | `[H, W]` int32 | binary GT (foreign object = 1); **absent on normal frames** → loader emits zeros |
-| `class_mask` | `[H, W]` uint8 | per-pixel COCO category id (0 = background); enables per-class AUROC |
+| `max_open_sessions` | 3 | recordings kept open per loader; every open one holds about 0.3 to 0.6 GB of GPU memory, and the train and the val loader each keep their own set. More open recordings mean fewer reopens (about 1 to 2 s each) during a shuffled epoch |
+| `read_ahead` | 1 | frames read ahead of the model step, on reader threads |
+| `cuda_cubes` | false | `true` keeps the cubes on the GPU instead of a round trip through host memory |
+| `sdk_cuda` | true (dataloader default) | `false` processes the cubes on the CPU: no extra GPU memory, but slower |
 
-Produce NPZ from a shipped `universe.csv` + `splits.json` with **cuvis-ai-dataloader**'s
-`convert_universe(universe.csv, dataset_root, NPZ_DIR, splits_json=splits/dinomaly.json)`: it
-materializes exactly the frames the `splits.json` selects and emits an npz `universe.csv`
-(`source, index, materialized_path`). A frame's COCO `image_id` is its read `index` (they are the
-same — the old separate-id decoupling is gone). The lower-level `cu3s-to-npz` / `convert_cu3s_file`
-remain available for ad-hoc conversion.
+On a 24 GB GPU add `data.reader.max_open_sessions=6`: in a 5-epoch RGB run on an RTX 4090 an
+epoch took 89 s instead of 176 s, at 13 GB of GPU memory instead of 9 GB. Keeping all 15
+recordings open is faster still but needs about 21 GB, and with `read_ahead: 2` and
+`cuda_cubes: true` together it crashed the Cuvis SDK in longer runs (an illegal memory access in
+its GPU memory pool, after 1 to 7 epochs).
+
+Each batch carries `cube` `[B, H, W, 61]` float32, `wavelengths` `[B, 61]` int32 and `mask`
+`[B, H, W]` int32 with the per-pixel COCO category ids (0 = background; a recording without a
+labels file gives zeros). `LentilsAnomalyDataNode(normal_class_ids=[0])` turns `mask` into the
+binary anomaly mask. A frame's COCO `image_id` is its read `index`.
 
 ### 4c. The Dinomaly split (train-on-normals)
 
@@ -126,8 +131,9 @@ models are directly comparable.
 
 ## 5. How to run
 
-From the repo root. `<INDEX>` = the `universe.csv`, `<SPLITS_JSON>` = the `splits.json` (a
-`convert_universe` output pair), `<OUT>` = output dir.
+From the repo root. `<LENTILS>` = the HF lentils download
+(`XMR_Industrial_Foreign_Object_Detection_Lentils/`), `<INDEX>` = `<LENTILS>/universe.csv`,
+`<SPLITS_JSON>` = `<LENTILS>/splits/dinomaly.json`, `<OUT>` = output dir.
 
 ```bash
 # RGB (fixed 650/550/450)
@@ -147,9 +153,8 @@ uv run python examples/train_dinomaly_rgb_frozen_adaclip_bands_multifile.py \
 ```
 
 Any config key is overridable on the command line (Hydra). Useful ones:
-`data.num_workers` (parallel NPZ loading — the cubes are ~260 MB each, so training is IO-bound;
-use 4–6 workers), `data.persistent_workers`, `dinomaly.image_size` (448 default, multiple of 14),
-`minmax_init_frames`. Note: `eval_mode` applies to the RGB/CIR scripts (the AdaCLIP-bands script
+`data.reader.max_open_sessions`, `data.reader.read_ahead`, `data.reader.cuda_cubes` (section 4b),
+`dinomaly.image_size` (448 default, multiple of 14), `minmax_init_frames`. Note: `eval_mode` applies to the RGB/CIR scripts (the AdaCLIP-bands script
 always evaluates with the best checkpoint).
 
 ---
@@ -193,7 +198,7 @@ uv run python examples/run_saved_dinomaly_pipeline_test_npz.py \
   --output-dir    <OUT>/eval_test
 ```
 
-For a **per-class pixel AUROC** breakdown (uses the baked `class_mask`), use the
+For a **per-class pixel AUROC** breakdown (from the per-pixel COCO category ids), use the
 `notebooks/lentils_anomaly/lentils_inference_tutorial.ipynb` notebook (set
 `PIPELINE_DIR=<OUT>/trained_models`).
 
@@ -201,9 +206,9 @@ For a **per-class pixel AUROC** breakdown (uses the baked `class_mask`), use the
 
 ## 8. Notes / gotchas
 
-- **IO-bound.** The 260 MB/frame cubes on spinning disk dominate wall-clock (~118 GB read per
-  epoch over the 456 train+val frames). Use `data.num_workers=4..6` to overlap loading with
-  compute; expect several minutes/epoch even so.
+- **GPU memory.** The open recordings live next to the model on the GPU, in the train and in
+  the val loader. Lower `data.reader.max_open_sessions` first when memory is short; at batch 1
+  the model step, not the read, sets the pace once `read_ahead` is on.
 - **Single GPU** → run one training at a time.
 - **Comparability.** RGB / CIR / AdaCLIP-bands train on the identical split, so their test metrics
   are directly comparable to each other and (on val/test) to the supervised AdaCLIP baseline.

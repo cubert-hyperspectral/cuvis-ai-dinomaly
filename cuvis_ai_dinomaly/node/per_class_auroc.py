@@ -15,6 +15,12 @@ reimplementing AUROC.
 Like ``AnomalyAUROCMetrics`` this is a training-time monitoring metric (binned approximation of
 the exact pooled AUROC); the notebook reads the whole-split value once via :meth:`compute` after a
 single ``Predictor`` pass.
+
+The class ids come in one of two shapes, depending on the data module. ``npz_multi`` carries them
+in a separate ``class_mask`` batch key, which ``AnomalyDataNode`` exposes as its ``class_mask``
+output (``[B, H, W, 1]``). The cu3s modules (``cu3s``, ``cu3s_multi``) carry them in the batch
+``mask`` itself (``[B, H, W]``), which ``AnomalyDataNode`` turns into the binary anomaly mask; a
+``CU3SDataNode`` passes it through unchanged into the ``category_mask`` port.
 """
 
 from __future__ import annotations
@@ -38,7 +44,12 @@ class PerClassAnomalyAUROC(_StreamingBinnedAUROC):
     Input ports
     -----------
     scores : ``[B, H, W, 1] float32`` — raw anomaly map (not thresholded)
-    class_mask : ``[B, H, W, 1] int32`` — multi-class ground truth (``background_id`` = normal)
+    class_mask : ``[B, H, W, 1] int32`` — multi-class ground truth (``background_id`` = normal),
+        as ``AnomalyDataNode`` exposes it from an ``npz_multi`` batch
+    category_mask : ``[B, H, W] int32``
+        The same class ids as the cu3s data modules deliver them in the batch ``mask`` (via a
+        ``CU3SDataNode`` passthrough), instead of ``class_mask``. Exactly one of the two carries
+        the ids; neither or both raises.
 
     Output ports
     ------------
@@ -59,6 +70,16 @@ class PerClassAnomalyAUROC(_StreamingBinnedAUROC):
             dtype=torch.int32,
             shape=(-1, -1, -1, 1),
             description="Multi-class ground-truth mask [B, H, W, 1] (background_id = normal)",
+            optional=True,
+        ),
+        "category_mask": PortSpec(
+            dtype=torch.int32,
+            shape=(-1, -1, -1),
+            description=(
+                "Per-pixel class ids [B, H, W] as the cu3s data modules deliver them in the batch "
+                "mask; connect this or class_mask, not both"
+            ),
+            optional=True,
         ),
     }
     OUTPUT_SPECS = {
@@ -110,14 +131,28 @@ class PerClassAnomalyAUROC(_StreamingBinnedAUROC):
     def forward(
         self,
         scores: Tensor,
-        class_mask: Tensor,
         context: Context,
+        class_mask: Tensor | None = None,
+        category_mask: Tensor | None = None,
     ) -> dict[str, Any]:
+        if class_mask is not None and category_mask is not None:
+            raise ValueError(
+                f"{self.name}: class ids arrive on both class_mask and category_mask; connect one"
+            )
+        if class_mask is not None:
+            class_ids = class_mask.squeeze(-1)
+        elif category_mask is not None:
+            class_ids = category_mask
+        else:
+            raise ValueError(
+                f"{self.name}: no class ids; connect class_mask ([B, H, W, 1], npz_multi via "
+                "AnomalyDataNode) or category_mask ([B, H, W], the cu3s batch mask via CU3SDataNode)"
+            )
         # Reset on the (stage, epoch) boundary so each epoch accumulates fresh.
         self._reset_on_epoch_boundary(context)
 
         preds = self._binned_preds(scores)  # [N] in [0, 1]
-        labels = class_mask.squeeze(-1).flatten().long()  # [N] class ids, pixel-aligned with preds
+        labels = class_ids.flatten().long()  # [N] class ids, pixel-aligned with preds
         is_background = labels == self.background_id
 
         metrics: list[Metric] = []

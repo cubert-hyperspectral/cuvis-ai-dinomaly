@@ -2,7 +2,8 @@
 #
 # Dinomaly + multi-file data (RGB false-color). Run from cuvis-ai-dinomaly repo:
 #   uv run python examples/train_dinomaly_rgb_multifile.py
-#   uv run python examples/train_dinomaly_rgb_multifile.py data.universe_csv=/path/to/universe.csv data.splits_json=/path/to/splits.json
+#   uv run python examples/train_dinomaly_rgb_multifile.py \
+#     data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json
 #
 defaults:
   - /training@training: default
@@ -19,18 +20,26 @@ eval_mode: best
 minmax_init_frames: 20
 
 data:
-  # NPZ backend (default): a convert_universe output pair.
-  data_module: npz_multi
-  universe_csv: /path/to/your/universe.csv
-  splits_json: /path/to/your/splits.json
-  # CU3S backend: set data_module: cu3s_multi and point universe_csv at a cu3s universe.csv
-  # (module-owned `split` column, or add a splits_json). universe_csv is shared by both backends.
+  # The lentils cu3s recordings, read directly by cuvis-ai-dataloader's cu3s_multi (needs the
+  # Cuvis SDK). The HF dataset (PublicDatasets "industrial_fod_lentils") ships both files:
+  # universe.csv lists every frame, splits/dinomaly.json assigns train / val / test.
+  data_module: cu3s_multi
+  universe_csv: /path/to/XMR_Industrial_Foreign_Object_Detection_Lentils/universe.csv
+  splits_json: /path/to/XMR_Industrial_Foreign_Object_Detection_Lentils/splits/dinomaly.json
   batch_size: 1
   processing_mode: Reflectance
-  num_workers: 6
-  pin_memory: true
-  persistent_workers: true
-  worker_multiprocessing_context: spawn
+  # The SDK reads in the training process; DataLoader workers cannot use it on the GPU.
+  num_workers: 0
+  # Reader options, passed to MultiCu3sDataModule as they are. Every open recording holds about
+  # 0.3 to 0.6 GB of GPU memory, and the train and the val loader each keep their own set. These
+  # values fit an 8 GB GPU (a laptop); on a 24 GB GPU 6 open recordings make an epoch about twice
+  # as fast (examples/LENTILS_TRAINING.md, section 4b). sdk_cuda: false processes the cubes on the
+  # CPU instead (no extra GPU memory, slower).
+  reader:
+    max_open_sessions: 3
+    read_ahead: 1
+    cuda_cubes: false
+    sdk_cuda: true
 
 dinomaly:
   use_center_crop: false

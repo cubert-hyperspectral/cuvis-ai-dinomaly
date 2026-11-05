@@ -2,7 +2,7 @@
 
 This script is intentionally standalone for one use case:
 - Use AdaCLIP frozen concrete-selector winning channel indices [14, 59, 57]
-- Resolve those indices to wavelengths from the first train NPZ in splits CSV
+- Resolve those indices to wavelengths from the first train frame
 - Build Dinomaly pipeline with FixedWavelengthSelector(target_wavelengths=(lambda14, lambda59, lambda57))
 - Train for 50 epochs by default (from Hydra config)
 
@@ -12,7 +12,6 @@ Expected resolved wavelengths on lentils 61-band data are typically:
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 from pathlib import Path
@@ -20,18 +19,17 @@ from pathlib import Path
 import hydra
 import numpy as np
 import torch
+from cu3s_data import build_cu3s_datamodule
 from cuvis_ai.node.channel_selector import FixedWavelengthSelector
 from cuvis_ai.node.data import LentilsAnomalyDataNode
 from cuvis_ai.node.deciders.binary_decider import QuantileBinaryDecider
 from cuvis_ai.node.metrics import AnomalyDetectionMetrics
 from cuvis_ai.node.monitor import TensorBoardMonitorNode
 from cuvis_ai.node.normalization import MinMaxNormalizer
-from cuvis_ai_core.data.splits_io import load_splits
 from cuvis_ai_core.pipeline.pipeline import CuvisPipeline
 from cuvis_ai_core.training import GradientTrainer, StatisticalTrainer
 from cuvis_ai_core.training.config import create_callbacks_from_config
 from cuvis_ai_core.utils.node_registry import NodeRegistry
-from cuvis_ai_dataloader.data import MultiCu3sDataModule, MultiNpzDataModule
 from cuvis_ai_schemas.pipeline import PipelineMetadata
 from cuvis_ai_schemas.training import CallbacksConfig, ModelCheckpointConfig, TrainingConfig
 from loguru import logger
@@ -41,26 +39,10 @@ FROZEN_ADACLIP_CONCRETE_BAND_INDICES: tuple[int, int, int] = (14, 59, 57)
 
 
 def _wavelengths_nm_for_band_indices(
-    universe: Path,
+    wavelengths: np.ndarray,
     indices: tuple[int, int, int],
 ) -> tuple[float, float, float]:
-    with universe.open(encoding="utf-8") as f:
-        rows = [r for r in csv.DictReader(f) if (r.get("materialized_path") or "").strip()]
-    if not rows:
-        raise ValueError(f"No rows with a materialized_path found in {universe}")
-
-    # universe.csv stores `materialized_path` relative to its own dir (or absolute).
-    npz_path = Path(rows[0]["materialized_path"])
-    if not npz_path.is_absolute():
-        npz_path = universe.resolve().parent / npz_path
-    if not npz_path.is_file():
-        raise FileNotFoundError(f"NPZ not found: {npz_path}")
-
-    z = np.load(npz_path)
-    if "wavelengths" not in z:
-        raise KeyError(f"{npz_path} does not contain 'wavelengths'")
-    w = np.asarray(z["wavelengths"], dtype=np.float64).ravel()
-
+    w = np.asarray(wavelengths, dtype=np.float64).ravel()
     vals: list[float] = []
     for idx in indices:
         if idx < 0 or idx >= len(w):
@@ -92,8 +74,14 @@ def main(cfg: DictConfig) -> None:
         "cuvis_ai_dinomaly.node.dinomaly_train_loss_bridge.DinomalyTrainLossBridge",
     )
 
-    universe = Path(cfg.data.universe_csv)
-    target_wl = _wavelengths_nm_for_band_indices(universe, FROZEN_ADACLIP_CONCRETE_BAND_INDICES)
+    # The cu3s recordings are read directly: data.universe_csv lists the frames, data.splits_json
+    # assigns them to train / val / test, data.reader holds the MultiCu3sDataModule reader options.
+    datamodule = build_cu3s_datamodule(cfg.data)
+
+    first_batch = next(iter(datamodule.train_dataloader()))
+    target_wl = _wavelengths_nm_for_band_indices(
+        first_batch["wavelengths"][0].cpu().numpy(), FROZEN_ADACLIP_CONCRETE_BAND_INDICES
+    )
     logger.info(
         "Using band indices {} -> target wavelengths (R,G,B) nm = {}",
         FROZEN_ADACLIP_CONCRETE_BAND_INDICES,
@@ -104,40 +92,12 @@ def main(cfg: DictConfig) -> None:
             {
                 "band_indices_rgb_order": list(FROZEN_ADACLIP_CONCRETE_BAND_INDICES),
                 "target_wavelengths_nm_rgb_order": list(target_wl),
-                "universe_csv": str(universe),
+                "universe_csv": str(cfg.data.universe_csv),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-
-    # Backend from data.data_module (both read the shared universe.csv):
-    # npz_multi (default) = data.universe_csv + data.splits_json; cu3s_multi = data.universe_csv.
-    common_loader_kwargs = {
-        "batch_size": cfg.data.batch_size,
-        "num_workers": int(cfg.data.get("num_workers", 0)),
-    }
-    backend = str(cfg.data.get("data_module", "npz_multi"))
-    if backend == "npz_multi":
-        datamodule = MultiNpzDataModule(
-            universe_csv=cfg.data.universe_csv,
-            splits=load_splits(cfg.data.splits_json),
-            **common_loader_kwargs,
-            pin_memory=bool(cfg.data.get("pin_memory", True)),
-            persistent_workers=bool(cfg.data.get("persistent_workers", True)),
-            worker_multiprocessing_context=str(
-                cfg.data.get("worker_multiprocessing_context", "spawn")
-            ),
-        )
-    elif backend == "cu3s_multi":
-        datamodule = MultiCu3sDataModule(
-            universe_csv=cfg.data.universe_csv,
-            **common_loader_kwargs,
-            processing_mode=cfg.data.processing_mode,
-        )
-    else:
-        raise ValueError(f"data.data_module must be 'npz_multi' or 'cu3s_multi', got {backend!r}.")
-    datamodule.setup(stage="fit")
 
     dcfg = cfg.dinomaly
     pipeline = CuvisPipeline("dinomaly_multifile_rgb_frozen_adaclip_bands")
