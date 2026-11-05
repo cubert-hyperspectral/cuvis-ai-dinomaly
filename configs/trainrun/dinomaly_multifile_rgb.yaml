@@ -2,7 +2,8 @@
 #
 # Dinomaly + multi-file data (RGB false-color). Run from cuvis-ai-dinomaly repo:
 #   uv run python examples/train_dinomaly_rgb_multifile.py
-#   uv run python examples/train_dinomaly_rgb_multifile.py \n#     data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json
+#   uv run python examples/train_dinomaly_rgb_multifile.py \
+#     data.universe_csv=<lentils>/universe.csv data.splits_json=<lentils>/splits/dinomaly.json
 #
 defaults:
   - /training@training: default
