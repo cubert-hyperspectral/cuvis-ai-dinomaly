@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## 0.9.0 - 2026-11-05
 
 - `DinomalyDetector.export_module()` returns an ONNX span-export adapter that reproduces the node's inference forward with no `.item()`, numpy lookup or Python branch on a tensor value: the input-scaling heuristic as a `torch.where` chain, and the preprocessing antialiased resize replaced by an equivalent fixed linear operator (`AntialiasResizeMatrix`, two matrices applied with `einsum`), since TensorRT 10.13 refuses an ONNX `Resize` node with antialiasing on. The matrices are built from the node's own resize on the first eager call and are exact to float32 rounding (~3e-5 at a 448 to 392 downscale, measured against a float64 reference). Tagged `NodeTag.ONNX`. Floors `cuvis-ai-core[hf]>=0.19.2` for `export_module()` and the `port_dtype` sidecar, and adds `cuvis-ai-core[onnx]` to the `dev` extra so the export tests can run onnxscript and onnxruntime.
 - Security: the pip-audit step now fails the build (it ran behind `|| true` with a note about anomalib and kornia advisories that no longer exist) and the locked environment is refreshed for the open advisories: aiohttp 3.14.3, anyio 4.14.2, cryptography 50.0.1, gitpython 3.1.62, hydra-core 1.3.7, lightning and pytorch-lightning 2.6.6, msgpack 1.2.2, pip 26.2.1, pygments 2.21.0, pytest 9.1.1, setuptools 84.0.0. Nothing is ignored.
