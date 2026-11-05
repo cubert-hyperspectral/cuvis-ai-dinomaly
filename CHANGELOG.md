@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Python 3.12 and 3.13 are supported: `requires-python` is `>=3.11,<3.14` (was `<3.12`), so pip installs the plugin on Colab, which runs 3.13. CI tests 3.11 and 3.13.
+- The `examples` extra relocks onto cuvis-ai-dataloader 0.9.1 (was 0.5.0), the first dataloader release that installs on 3.13. The packages under it follow dataloader 0.9.1's own floors: cuvis and cuvis-il 3.6.1 (were 3.5.3) and dataclass-wizard 0.39.1 (was 1.0.0; dataloader caps it below 1.0). Nothing outside that extra changed version.
+
 ## 0.9.0 - 2026-11-05
 
 - `DinomalyDetector.export_module()` returns an ONNX span-export adapter that reproduces the node's inference forward with no `.item()`, numpy lookup or Python branch on a tensor value: the input-scaling heuristic as a `torch.where` chain, and the preprocessing antialiased resize replaced by an equivalent fixed linear operator (`AntialiasResizeMatrix`, two matrices applied with `einsum`), since TensorRT 10.13 refuses an ONNX `Resize` node with antialiasing on. The matrices are built from the node's own resize on the first eager call and are exact to float32 rounding (~3e-5 at a 448 to 392 downscale, measured against a float64 reference). Tagged `NodeTag.ONNX`. Floors `cuvis-ai-core[hf]>=0.19.2` for `export_module()` and the `port_dtype` sidecar, and adds `cuvis-ai-core[onnx]` to the `dev` extra so the export tests can run onnxscript and onnxruntime.
