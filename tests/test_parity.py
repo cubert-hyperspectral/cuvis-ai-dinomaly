@@ -52,7 +52,9 @@ def test_inference_matches_raw_model() -> None:
     torch.manual_seed(1)
     enc = "dinov2reg_vit_small_14"
     raw = DinomalyModel(encoder_name=enc)
-    det = DinomalyDetector(encoder_name=enc)
+    # The default align_map_to_input=True upsamples the map by area, so its score differs
+    # from anomalib's on purpose; compare with anomalib's own upsampling.
+    det = DinomalyDetector(encoder_name=enc, align_map_to_input=False)
     det.dinomaly_model.load_state_dict(raw.state_dict())
 
     x = torch.rand(1, 128, 128, 3)
